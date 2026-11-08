@@ -10,7 +10,7 @@
                    Cole abaixo as URLs dos webhooks de cada cenário.
    ========================================================= */
 const CONFIG = {
-  MODO: 'local', // 'local', 'sheets' (Apps Script) ou 'make'
+  MODO: 'sheets', // 'local', 'sheets' (Apps Script) ou 'make'
 
   // Link do Apps Script (Implantar > App da Web). Termina com /exec
   URL_APPS_SCRIPT: 'https://script.google.com/macros/s/AKfycbyljEWGagl7jGI18c3bvnnk3h2aQdKOa9uSHbe5QFuXGGOAOYHHI36lQq45RprCy-sk/exec',
