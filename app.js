@@ -151,6 +151,9 @@ const IC = {
 
 /* ===================== Estado e permissões ===================== */
 const CHAVE_SESSAO = 'caderneta_sessao';
+// Sessão vale só para a aba aberta: abrir o link de novo sempre mostra a tela de Entrar
+const sessao = window.sessionStorage;
+try { localStorage.removeItem(CHAVE_SESSAO); } catch { /* sessões antigas */ }
 const estado = { usuario: null, filtroClientes: 'todos', buscaClientes: '', mesRelatorio: null };
 let promptInstalacao = null;
 
@@ -654,7 +657,7 @@ function telaLogin() {
 
 function entrar(usuario) {
   estado.usuario = usuario;
-  try { localStorage.setItem(CHAVE_SESSAO, usuario.id); } catch { /* modo privado */ }
+  try { sessao.setItem(CHAVE_SESSAO, usuario.id); } catch { /* modo privado */ }
   // registra o último acesso (sem travar a entrada se a internet falhar)
   API.atualizar(usuario.id, { ultimo_acesso: new Date().toISOString() })
     .then(u => { if (estado.usuario?.id === u.id) estado.usuario = u; })
@@ -667,7 +670,7 @@ function entrar(usuario) {
 function sair() {
   estado.usuario = null;
   estado.abaEntrada = 'entrar'; // ao sair, a tela de entrada sempre abre na aba Entrar
-  try { localStorage.removeItem(CHAVE_SESSAO); } catch { /* ignore */ }
+  try { sessao.removeItem(CHAVE_SESSAO); } catch { /* ignore */ }
   location.hash = '';
   rotear();
 }
@@ -675,7 +678,7 @@ function sair() {
 /* Recarrega o usuário logado (permissões podem ter mudado) */
 function sincronizarUsuario() {
   let id = estado.usuario?.id;
-  if (!id) { try { id = localStorage.getItem(CHAVE_SESSAO); } catch { id = null; } }
+  if (!id) { try { id = sessao.getItem(CHAVE_SESSAO); } catch { id = null; } }
   const u = id ? API.obter(id) : null;
   estado.usuario = u && u.tabela === 'usuario' && u.ativo !== false ? u : null;
 }
