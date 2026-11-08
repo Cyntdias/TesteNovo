@@ -518,12 +518,14 @@ const camposAcesso = (u = {}, { pinOpcional = false } = {}) => `
 /* ===================== TELA: Configuração inicial (cadastro da loja) ===================== */
 function telaConfiguracao() {
   esconderEstrutura();
-  document.title = `Configurar loja · ${CONFIG.APP_NOME}`;
+  document.title = `Cadastrar loja · ${CONFIG.APP_NOME}`;
   const lojaExistente = loja(); // caso a configuração tenha sido interrompida no meio
   conteudo.innerHTML = `
     <div class="tela-entrada">
-      ${marca('Controle de fiado da sua loja. Vamos começar!')}
+      ${marca('Controle de fiado da sua loja')}
       <form id="form" class="cartao" novalidate>
+        ${abasEntrada('cadastrar')}
+        <p class="dica cor-suave" style="margin:0 0 16px">Primeiro acesso: cadastre a sua loja e crie o seu acesso de dono. Depois, os funcionários pedem acesso pela aba Cadastrar.</p>
         <h2 class="secao-titulo">1. Dados da loja</h2>
         ${camposLoja(lojaExistente || {})}
         <h2 class="secao-titulo">2. Seu acesso (dono)</h2>
@@ -532,6 +534,7 @@ function telaConfiguracao() {
       </form>
       <p class="dica cor-suave" style="text-align:center">Banco de dados: ${esc(API.modo)}</p>
     </div>`;
+  ligarAbasEntrada();
   const form = $('#form');
   mascararTelefone(form.loja_telefone);
   prepararLogo(form);
@@ -550,24 +553,37 @@ function telaConfiguracao() {
       });
     });
     if (!ok) return;
+    estado.abaEntrada = 'entrar';
     entrar(dono);
     toast('Loja criada com sucesso!', 'ok');
   });
 }
 
 /* ===================== TELA: Entrada (abas Entrar / Cadastrar) ===================== */
+const semLoja = () => !loja() || !usuarios().some(u => u.papel === 'dono');
+function abasEntrada(aba) {
+  return `
+    <div class="segmentado" role="tablist" aria-label="Entrar ou cadastrar">
+      ${[['entrar', 'Entrar'], ['cadastrar', 'Cadastrar']].map(([v, r]) => `<button type="button" role="tab" data-aba="${v}" class="${aba === v ? 'ativo' : ''}" aria-selected="${aba === v}">${r}</button>`).join('')}
+    </div>`;
+}
+function ligarAbasEntrada() {
+  $$('[data-aba]').forEach(b => b.addEventListener('click', () => { estado.abaEntrada = b.dataset.aba; rotear(); }));
+}
+
 function telaLogin() {
   esconderEstrutura();
   const aba = estado.abaEntrada || 'entrar';
+  // Primeiro acesso (sem loja): a aba Cadastrar é o cadastro da loja e do dono
+  if (aba === 'cadastrar' && semLoja()) return telaConfiguracao();
+  const primeiroAcesso = semLoja();
   document.title = `${aba === 'entrar' ? 'Entrar' : 'Cadastrar'} · ${CONFIG.APP_NOME}`;
-  const abas = [['entrar', 'Entrar'], ['cadastrar', 'Cadastrar']];
   conteudo.innerHTML = `
     <div class="tela-entrada">
-      ${marca(loja().nome)}
+      ${marca(primeiroAcesso ? 'Controle de fiado da sua loja' : loja().nome)}
       <div class="cartao">
-        <div class="segmentado" role="tablist" aria-label="Entrar ou cadastrar">
-          ${abas.map(([v, r]) => `<button type="button" role="tab" data-aba="${v}" class="${aba === v ? 'ativo' : ''}" aria-selected="${aba === v}">${r}</button>`).join('')}
-        </div>
+        ${abasEntrada(aba)}
+        ${primeiroAcesso ? `<div class="aviso-faixa info">${IC.loja}<span><strong>Primeiro acesso?</strong> Toque em <strong>Cadastrar</strong> para criar sua loja e o seu acesso de dono.</span></div>` : ''}
         ${estado.avisoEntrada ? `<div class="aviso-faixa info">${IC.check}<span>${esc(estado.avisoEntrada)}</span></div>` : ''}
         ${aba === 'entrar' ? `
         <form id="form" novalidate>
@@ -576,7 +592,7 @@ function telaLogin() {
           <label class="check" style="border:0;margin:-8px 0 8px"><input type="checkbox" id="mostrar-senha"> Mostrar senha</label>
           <button class="btn btn-primario btn-bloco" type="submit">Entrar</button>
         </form>
-        <p class="dica cor-suave" style="text-align:center;margin:16px 0 0"><strong>Esqueceu a senha?</strong> Funcionário: peça ao dono para redefinir no app. Dono: use o menu <em>Caderneta → Redefinir senha</em> na planilha.</p>`
+        <p class="dica cor-suave" style="text-align:center;margin:16px 0 0"><strong>Esqueceu a senha?</strong> Peça ao dono da loja para redefinir.</p>`
         : `
         <form id="form" novalidate>
           <p class="dica cor-suave" style="margin:0 0 16px">É funcionário da loja? Crie seu acesso. O dono vai aprovar e escolher o que você pode fazer no app.</p>
@@ -588,7 +604,7 @@ function telaLogin() {
     </div>`;
   estado.avisoEntrada = '';
 
-  $$('[data-aba]').forEach(b => b.addEventListener('click', () => { estado.abaEntrada = b.dataset.aba; telaLogin(); }));
+  ligarAbasEntrada();
   const form = $('#form');
   $('#mostrar-senha').addEventListener('change', e => {
     $$('input[name="pin"], input[name="pin2"]', form).forEach(i => { i.type = e.target.checked ? 'text' : 'password'; });
@@ -599,6 +615,10 @@ function telaLogin() {
     form.addEventListener('submit', e => {
       e.preventDefault();
       const d = lerFormulario(form);
+      if (primeiroAcesso) {
+        mostrarErros(form, { login: 'Ainda não há nenhuma loja cadastrada. Toque em Cadastrar para criar a sua.' });
+        return;
+      }
       const u = usuarios().find(x => x.login === normalizar(d.login));
       if (!u || hashPin(d.pin, u.pin_sal) !== u.pin_hash) {
         mostrarErros(form, { pin: 'Usuário ou senha incorretos.' });
@@ -1877,7 +1897,7 @@ const ROTAS_FORMULARIO = /\/(novo|editar|compra|pagamento)(\?senha)?$|^#\/loja$/
 
 function rotear() {
   // Sem loja ou sem dono cadastrado = primeira configuração
-  if (!loja() || !usuarios().some(u => u.papel === 'dono')) return telaConfiguracao();
+  if (semLoja()) return telaLogin();
   if (!estado.usuario) return telaLogin();
   const hash = location.hash || '#/inicio';
   for (const [regex, tela] of ROTAS) {
