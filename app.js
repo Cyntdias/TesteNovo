@@ -99,11 +99,6 @@ function mascararTelefone(input) {
     input.value = v;
   });
 }
-function linkWhatsApp(telefone, mensagem) {
-  let d = soDigitos(telefone);
-  if (d.length <= 11) d = CONFIG.DDI_WHATSAPP + d;
-  return `https://wa.me/${d}?text=${encodeURIComponent(mensagem)}`;
-}
 
 /* Senha: guardamos apenas um "hash" com sal, nunca a senha em texto puro */
 function hashTexto(str, semente = 0) {
@@ -132,7 +127,6 @@ const IC = {
   busca: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', 20),
   compra: svg('<path d="M6 7h12l1 14H5zM9 7a3 3 0 0 1 6 0"/>', 20),
   pagamento: svg('<circle cx="12" cy="12" r="9"/><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .8-3 2s1.3 1.7 3 2 3 .8 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2M12 16v2"/>', 20),
-  whats: svg('<path d="M3 21l1.7-5A8.5 8.5 0 1 1 8 19.3zM9 10h.01M12 10h.01M15 10h.01"/>', 20),
   telefone: svg('<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>', 20),
   loja: svg('<path d="M3 9l1.5-5h15L21 9M3 9v11h18V9M3 9h18M9 20v-6h6v6"/>', 22),
   sair: svg('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>', 22),
@@ -843,7 +837,7 @@ function telaClienteForm(id) {
   conteudo.innerHTML = `
     <form id="form" class="cartao" novalidate>
       ${campo({ rotulo: 'Nome completo', nome: 'nome', valor: c.nome, obrig: true, attrs: 'autocomplete="off" maxlength="80"' })}
-      ${campo({ rotulo: 'Telefone / WhatsApp', nome: 'telefone', tipo: 'tel', valor: formatarTelefone(c.telefone), obrig: true, attrs: 'inputmode="tel" placeholder="(00) 00000-0000"', dica: 'Obrigatório — usado para avisos de cobrança' })}
+      ${campo({ rotulo: 'Telefone', nome: 'telefone', tipo: 'tel', valor: formatarTelefone(c.telefone), obrig: true, attrs: 'inputmode="tel" placeholder="(00) 00000-0000"', dica: 'Obrigatório' })}
       ${campo({ rotulo: 'CPF', nome: 'cpf', valor: c.cpf, attrs: 'inputmode="numeric" maxlength="14"' })}
       ${campo({ rotulo: 'Endereço', nome: 'endereco', valor: c.endereco, attrs: 'maxlength="120"' })}
       ${campo({ rotulo: 'Limite de crédito', nome: 'limite', valor: valorParaCampo(c.limite), prefixo: 'R$', attrs: 'inputmode="decimal" placeholder="Sem limite"', dica: 'Opcional. O app bloqueia compras que passem desse valor.' })}
@@ -891,12 +885,11 @@ function telaClienteDetalhe(id) {
   definirTopo(c.nome, '#/clientes');
   const s = situacao(id);
   const restantePorCompra = Object.fromEntries(s.abertas.map(a => [a.id, a.restante]));
-  const extrato = [...s.lancs].sort((a, b) => b.data.localeCompare(a.data) || String(b.criado_em).localeCompare(String(a.criado_em)));
+  const extrato = [...s.lancs].sort((a, b) =>
+    b.data.localeCompare(a.data) ||                                   // mais recentes primeiro
+    (a.grupo_id && a.grupo_id === b.grupo_id ? (a.parcela || 0) - (b.parcela || 0) : 0) || // parcelas em ordem: 1/12, 2/12…
+    String(b.criado_em).localeCompare(String(a.criado_em)));
   const hoje = hojeISO();
-  const nomeLoja = loja().nome;
-  const msgCobranca = `Olá, ${c.nome.split(' ')[0]}! Tudo bem? Aqui é da ${nomeLoja}. ` +
-    (s.valorVencido > 0 ? `Passando para lembrar que há ${brl(s.valorVencido)} vencido(s) na sua conta. ` : `Seu saldo em aberto é de ${brl(s.saldo)}. `) +
-    'Qualquer dúvida, estamos à disposição. Obrigado!';
 
   const nomeCompra = l => (l.descricao || `Compra de ${dataBR(l.data)}`) + sufixoParcela(l);
   const comprasPorId = Object.fromEntries(s.lancs.filter(l => l.tipo === 'compra').map(l => [l.id, l]));
@@ -954,7 +947,6 @@ function telaClienteDetalhe(id) {
         ${c.observacoes ? `<div><dt>Observações</dt><dd>${esc(c.observacoes)}</dd></div>` : ''}
       </dl>
       <div class="acoes" style="margin-top:16px">
-        <a class="btn btn-whats btn-pequeno" target="_blank" rel="noopener" href="${linkWhatsApp(c.telefone, msgCobranca)}">${IC.whats} WhatsApp</a>
         <a class="btn btn-secundario btn-pequeno" href="tel:${soDigitos(c.telefone)}">${IC.telefone} Ligar</a>
       </div>
     </div>
@@ -1317,28 +1309,22 @@ function telaAvisos() {
   if (!exigir('avisos_ver')) return;
   definirTopo('Avisos de vencimento');
   const geral = resumoGeral();
-  const nomeLoja = loja().nome;
   const vencidos = geral.filter(g => g.valorVencido > 0).sort((a, b) => a.vencidas[0].vencimento.localeCompare(b.vencidas[0].vencimento));
   const proximos = geral.filter(g => g.valorAVencer > 0).sort((a, b) => a.aVencer[0].vencimento.localeCompare(b.aVencer[0].vencimento));
 
   const item = (g, vencido) => {
     const venc = vencido ? g.vencidas[0].vencimento : g.aVencer[0].vencimento;
     const valor = vencido ? g.valorVencido : g.valorAVencer;
-    const msg = `Olá, ${g.cliente.nome.split(' ')[0]}! Tudo bem? Aqui é da ${nomeLoja}. ` +
-      (vencido ? `Lembramos que há ${brl(valor)} com vencimento em ${dataBR(venc)} ainda em aberto.`
-               : `Lembramos que ${brl(valor)} vence em ${dataBR(venc)}.`) +
-      ' Qualquer dúvida, estamos à disposição. Obrigado!';
     return `
-      <div class="item">
+      <a class="item" href="#/clientes/${g.cliente.id}">
         <div class="avatar">${esc(iniciais(g.cliente.nome))}</div>
-        <a class="item-corpo" href="#/clientes/${g.cliente.id}" style="color:inherit;text-decoration:none">
+        <div class="item-corpo">
           <div class="item-titulo">${esc(g.cliente.nome)}</div>
           <div class="item-sub ${vencido ? 'cor-perigo' : 'cor-alerta'}">${dataBR(venc)} · ${textoPrazo(venc)}</div>
-        </a>
+        </div>
         <div class="item-valor">${brl(valor)}</div>
-        <a class="btn-icone btn-whats" style="flex-shrink:0" target="_blank" rel="noopener" aria-label="Cobrar ${esc(g.cliente.nome)} pelo WhatsApp"
-           href="${linkWhatsApp(g.cliente.telefone, msg)}">${IC.whats}</a>
-      </div>`;
+        <span class="cor-suave" aria-hidden="true">${IC.dir}</span>
+      </a>`;
   };
 
   const notifSuportada = 'Notification' in window;
