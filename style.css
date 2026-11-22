@@ -97,6 +97,11 @@ h2, h3 { margin: 0; }
 .saudacao h2 { font-size: var(--t-lg); }
 .saudacao p { margin: var(--e1) 0 0; color: var(--texto-suave); font-size: var(--t-sm); }
 
+.cabecalho-secao { display: flex; justify-content: space-between; align-items: center; gap: var(--e2); margin: var(--e5) 0 var(--e2); }
+.cabecalho-secao .secao-titulo { margin: 0; }
+.filtro-datas { display: grid; grid-template-columns: 1fr 1fr; gap: var(--e3); }
+.filtro-datas .campo { margin-bottom: var(--e3); }
+.filtro-datas label { font-size: var(--t-xs); color: var(--texto-suave); margin-bottom: var(--e1); }
 .grade-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--e3); margin-bottom: var(--e4); }
 .indicador { background: var(--superficie); border-radius: var(--raio); box-shadow: var(--sombra); padding: var(--e4); border-left: 4px solid var(--primaria); }
 .indicador .rotulo { font-size: var(--t-xs); color: var(--texto-suave); font-weight: 500; }
