@@ -726,8 +726,16 @@ function telaInicio() {
   const lancsMes = API.listar('lancamento').filter(x => x.data?.slice(0, 7) === mes);
   const aReceber = somar(geral.filter(g => g.saldo > 0), g => g.saldo);
   const vencidos = geral.filter(g => g.valorVencido > 0);
-  const proximos = geral.flatMap(g => g.abertas.map(c => ({ ...c, cliente: g.cliente })))
-    .filter(c => c.vencimento).sort((a, b) => a.vencimento.localeCompare(b.vencimento)).slice(0, 5);
+  // filtro de datas dos próximos vencimentos: padrão de hoje até hoje + 30 dias
+  const padraoDe = hojeISO(), padraoAte = somarDias(hojeISO(), 30);
+  const vDe = estado.vencDe || padraoDe, vAte = estado.vencAte || padraoAte;
+  const filtroPadrao = vDe === padraoDe && vAte === padraoAte;
+  const todosProximos = geral.flatMap(g => g.abertas.map(c => ({ ...c, cliente: g.cliente })))
+    .filter(c => c.vencimento).sort((a, b) => a.vencimento.localeCompare(b.vencimento));
+  const noPeriodo = todosProximos.filter(c => c.vencimento >= vDe && c.vencimento <= vAte);
+  const MAX_PROXIMOS = 20;
+  const proximos = noPeriodo.slice(0, MAX_PROXIMOS);
+  const foraDoPeriodo = todosProximos.filter(c => c.vencimento > vAte).length;
   const hora = new Date().getHours();
   const saudacao = hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite';
 
@@ -762,7 +770,15 @@ function telaInicio() {
         <span><strong>${vencidos.length} cliente(s) com pagamento vencido.</strong> Toque para ver.</span></a>` : ''}
 
     ${pode('clientes_ver') ? `
-    <h2 class="secao-titulo">Próximos vencimentos</h2>
+    <div class="cabecalho-secao">
+      <h2 class="secao-titulo">Próximos vencimentos</h2>
+      ${filtroPadrao ? '<span class="dica cor-suave">Próximos 30 dias</span>' : '<button type="button" class="btn btn-texto btn-pequeno" id="venc-limpar">Voltar p/ 30 dias</button>'}
+    </div>
+    <div class="filtro-datas">
+      <div class="campo"><label for="venc-de">De</label><input type="date" id="venc-de" value="${vDe}"></div>
+      <div class="campo"><label for="venc-ate">Até</label><input type="date" id="venc-ate" value="${vAte}" min="${vDe}"></div>
+    </div>
+    <p class="dica cor-suave" style="margin:-4px 0 8px">${noPeriodo.length} conta(s) · ${brl(somar(noPeriodo, c => c.restante))} no período${noPeriodo.length > MAX_PROXIMOS ? ` · mostrando as ${MAX_PROXIMOS} primeiras` : ''}</p>
     ${proximos.length ? `<div class="lista">${proximos.map(c => `
       <a class="item" href="#/clientes/${c.cliente.id}">
         <div class="avatar">${esc(iniciais(c.cliente.nome))}</div>
@@ -772,7 +788,20 @@ function telaInicio() {
         </div>
         <div class="item-valor">${brl(c.restante)}</div>
       </a>`).join('')}</div>`
-    : `<div class="cartao vazio">Nenhuma conta em aberto. 🎉</div>`}` : ''}`;
+    : `<div class="cartao vazio">${todosProximos.length ? `Nenhum vencimento neste período.${foraDoPeriodo ? ` Há ${foraDoPeriodo} conta(s) com vencimento depois de ${dataBR(vAte)}.` : ''}` : 'Nenhuma conta em aberto. 🎉'}</div>`}` : ''}`;
+
+  // filtro de datas: muda só a lista, sem perder o que foi escolhido (volta ao padrão ao sair do app)
+  const aplicar = () => {
+    const de = $('#venc-de').value || padraoDe;
+    let ate = $('#venc-ate').value || padraoAte;
+    if (ate < de) ate = de;
+    estado.vencDe = de === padraoDe ? null : de;
+    estado.vencAte = ate === padraoAte ? null : ate;
+    telaInicio();
+  };
+  $('#venc-de')?.addEventListener('change', aplicar);
+  $('#venc-ate')?.addEventListener('change', aplicar);
+  $('#venc-limpar')?.addEventListener('click', () => { estado.vencDe = estado.vencAte = null; telaInicio(); });
 }
 
 /* ===================== TELA: Clientes (Listagem / READ) ===================== */
