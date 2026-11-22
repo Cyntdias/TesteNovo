@@ -146,8 +146,60 @@ const API = (() => {
     if (!remoto()) salvarLocal();
   }
 
+  /* ---------- Recuperar senha por e-mail ---------- */
+  // No modo 'sheets' a planilha gera o código e envia pelo Gmail.
+  // No modo 'local' (teste) não há como mandar e-mail: o código aparece na tela.
+  const recuperacoesLocais = {};
+  const mascararEmail = email => {
+    const [nome = '', dominio = ''] = String(email).split('@');
+    return nome.slice(0, 2) + '*'.repeat(Math.max(3, nome.length - 2)) + '@' + dominio;
+  };
+  async function acaoPlanilha(operacao, campos) {
+    let json;
+    try { json = JSON.parse(await chamarSheets(operacao, campos)); }
+    catch (e) { throw new Error(String(e.message || e).replace(/^Erro na planilha: /, '')); }
+    return json;
+  }
+  const SEM_RECUPERACAO_MAKE = 'A recuperação por e-mail funciona com o Google Planilhas (modo sheets). Peça ao responsável pela planilha para trocar a senha.';
+
+  async function pedirCodigoSenha(login) {
+    if (modoMake()) throw new Error(SEM_RECUPERACAO_MAKE);
+    if (modoSheets()) return acaoPlanilha('pedir_codigo', { login });
+    const u = registros.find(r => r.tabela === 'usuario' && r.login === login);
+    if (!u) throw new Error('Usuário não encontrado. Confira como você escreve o seu usuário.');
+    if (!u.email) throw new Error(u.papel === 'dono'
+      ? 'Esse usuário não tem e-mail cadastrado. Fale com o responsável pela planilha para trocar a senha.'
+      : 'Esse usuário não tem e-mail cadastrado. Peça ao dono da loja para trocar a sua senha.');
+    const codigo = String(Math.floor(100000 + Math.random() * 900000));
+    recuperacoesLocais[login] = { codigo, expira: Date.now() + 15 * 60000, t: 0 };
+    return { ok: true, email: mascararEmail(u.email), codigo_teste: codigo };
+  }
+
+  async function trocarSenhaComCodigo(login, codigo, pin_sal, pin_hash) {
+    if (modoMake()) throw new Error(SEM_RECUPERACAO_MAKE);
+    if (modoSheets()) {
+      await acaoPlanilha('trocar_senha', { login, codigo, pin_sal, pin_hash });
+      await carregar(); // traz a senha nova da planilha
+      return true;
+    }
+    const r = recuperacoesLocais[login];
+    if (!r || Date.now() > r.expira) throw new Error('O código expirou ou não foi pedido. Toque em Reenviar código.');
+    if (r.codigo !== codigo) {
+      r.t += 1;
+      if (r.t >= 5) { delete recuperacoesLocais[login]; throw new Error('Muitas tentativas erradas. Toque em Reenviar código.'); }
+      throw new Error(`Código incorreto. Restam ${5 - r.t} tentativa(s).`);
+    }
+    const u = registros.find(x => x.tabela === 'usuario' && x.login === login);
+    const agora = new Date().toISOString();
+    Object.assign(u, { pin_sal, pin_hash, senha_redefinida_em: agora, senha_redefinida_por: 'Recuperação por e-mail', atualizado_em: agora });
+    salvarLocal();
+    delete recuperacoesLocais[login];
+    return true;
+  }
+
   return {
     carregar, listar, obter, listarTodos, obterQualquer, definirLoja, criar, atualizar, excluir,
+    pedirCodigoSenha, trocarSenhaComCodigo,
     get lojaAtual() { return lojaAtual; },
     get ultimaLeitura() { return ultimaLeitura; },
     // "Impressão digital" dos dados: muda quando algo é criado, editado ou excluído
