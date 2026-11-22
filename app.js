@@ -554,7 +554,7 @@ function telaConfiguracao() {
   document.title = `Criar loja · ${CONFIG.APP_NOME}`;
   conteudo.innerHTML = `
     <div class="tela-entrada">
-      ${marca('Controle de fiado')}
+      ${marca('Controle de Fiado')}
       <form id="form" class="cartao" novalidate>
         ${abasEntrada('cadastrar')}
         ${escolhaCadastro('dono')}
@@ -598,7 +598,7 @@ function telaPedidoAcesso() {
   document.title = `Pedir acesso · ${CONFIG.APP_NOME}`;
   conteudo.innerHTML = `
     <div class="tela-entrada">
-      ${marca('Controle de fiado')}
+      ${marca('Controle de Fiado')}
       <form id="form" class="cartao" novalidate>
         ${abasEntrada('cadastrar')}
         ${escolhaCadastro('funcionario')}
@@ -646,7 +646,7 @@ function telaLogin() {
   document.title = `Entrar · ${CONFIG.APP_NOME}`;
   conteudo.innerHTML = `
     <div class="tela-entrada">
-      ${marca('Controle de fiado')}
+      ${marca('Controle de Fiado')}
       <div class="cartao">
         ${abasEntrada('entrar')}
         ${estado.avisoEntrada ? `<div class="aviso-faixa info">${IC.check}<span>${esc(estado.avisoEntrada)}</span></div>` : ''}
