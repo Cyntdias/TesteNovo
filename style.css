@@ -247,6 +247,25 @@ a.item:hover, button.item:hover { background: #F8FAFC; cursor: pointer; }
 .codigo-loja .rotulo { font-size: var(--t-xs); color: var(--primaria-escura); font-weight: 600; }
 .codigo-loja .codigo { font-size: var(--t-xl); font-weight: 700; letter-spacing: .12em; color: var(--primaria-escura); font-variant-numeric: tabular-nums; }
 
+/* Recibo */
+.item-com-recibo { border-bottom: 1px solid var(--borda); }
+.item-com-recibo:last-child { border-bottom: 0; }
+.item-com-recibo > .item { border-bottom: 0; }
+.btn-recibo { margin: -6px 16px 12px 68px; min-height: 36px; }
+.recibo { padding: var(--e5); }
+.recibo-topo { display: flex; align-items: center; gap: var(--e3); padding-bottom: var(--e4); border-bottom: 1px solid var(--borda); }
+.recibo-logo { width: 52px; height: 52px; border-radius: 12px; object-fit: contain; background: #fff; flex-shrink: 0; }
+.recibo-logo-vazio { display: grid; place-items: center; background: var(--primaria-clara); color: var(--primaria); }
+.recibo-loja { font-weight: 700; font-size: var(--t-lg); }
+.recibo-dados { font-size: var(--t-xs); color: var(--texto-suave); margin-top: 2px; }
+.recibo-titulo { display: flex; justify-content: space-between; margin: var(--e4) 0 var(--e1); font-weight: 700; letter-spacing: .12em; color: var(--primaria-escura); }
+.recibo-valor { font-size: 32px; font-weight: 700; color: var(--texto); margin-bottom: var(--e3); }
+.recibo-texto { line-height: 1.6; margin: 0 0 var(--e4); }
+.recibo-detalhes { padding: var(--e3) 0; border-top: 1px solid var(--borda); border-bottom: 1px solid var(--borda); }
+.recibo-assinatura { text-align: center; margin-top: var(--e6); font-size: var(--t-sm); }
+.recibo-assinatura .linha { width: 70%; margin: 0 auto var(--e2); border-top: 1px solid var(--texto); }
+@media print { .recibo { border: 1px solid #000 !important; max-width: 520px; margin: 0 auto; } }
+
 /* Registro de cadastros */
 .registro-usuario .registro-topo { display: flex; align-items: center; gap: var(--e3); margin-bottom: var(--e3); }
 
