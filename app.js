@@ -493,8 +493,11 @@ const camposLoja = (l = {}) => `
     ${campo({ rotulo: 'Avisar antes', nome: 'dias_aviso', tipo: 'number', valor: l.dias_aviso ?? 3, obrig: true, attrs: 'inputmode="numeric" min="0" max="30"', dica: 'Dias de antecedência do aviso' })}
   </div>`;
 
-function validarAcesso(d, { exigirPin, idAtual = null }) {
+const emailValido = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e || '');
+function validarAcesso(d, { exigirPin, idAtual = null, exigirEmail = false }) {
   const erros = {};
+  if (exigirEmail && !d.email) erros.email = 'Informe o e-mail. É por ele que você recupera a senha.';
+  else if (d.email && !emailValido(d.email)) erros.email = 'E-mail inválido. Ex.: nome@gmail.com';
   if (!d.nome || d.nome.length < 2) erros.nome = 'Informe o nome.';
   const login = normalizar(d.login);
   if (!/^[a-z0-9._-]{3,20}$/.test(login)) erros.login = 'De 3 a 20 caracteres: letras, números, ponto, hífen ou _.';
@@ -505,8 +508,10 @@ function validarAcesso(d, { exigirPin, idAtual = null }) {
   }
   return erros;
 }
-const camposAcesso = (u = {}, { pinOpcional = false } = {}) => `
+const camposAcesso = (u = {}, { pinOpcional = false, email = 'opcional' } = {}) => `
   ${campo({ rotulo: 'Nome', nome: 'nome', valor: u.nome, obrig: true, attrs: 'autocomplete="name" maxlength="60"' })}
+  ${campo({ rotulo: 'E-mail', nome: 'email', tipo: 'email', valor: u.email, obrig: email === 'obrig', attrs: 'autocapitalize="none" autocomplete="email" inputmode="email" maxlength="80" placeholder="nome@gmail.com"',
+    dica: email === 'obrig' ? 'Usado para recuperar a senha se você esquecer.' : 'Opcional. Com ele, a pessoa recupera a senha sozinha.' })}
   ${campo({ rotulo: 'Usuário (para entrar no app)', nome: 'login', valor: u.login, obrig: true, attrs: 'autocapitalize="none" autocomplete="username" maxlength="20"', dica: 'Ex.: maria ou joao.silva' })}
   <div class="linha-2">
     ${campo({ rotulo: pinOpcional ? 'Nova senha' : 'Senha', nome: 'pin', tipo: 'password', obrig: !pinOpcional, attrs: 'maxlength="20" autocomplete="new-password"', dica: pinOpcional ? 'Em branco = manter' : 'Mínimo 4 caracteres' })}
@@ -562,7 +567,7 @@ function telaConfiguracao() {
         <h2 class="secao-titulo">1. Dados da loja</h2>
         ${camposLoja({})}
         <h2 class="secao-titulo">2. Seu acesso (dono)</h2>
-        ${camposAcesso()}
+        ${camposAcesso({}, { email: 'obrig' })}
         <label class="check" style="border:0;margin:-8px 0 8px"><input type="checkbox" id="mostrar-senha"> Mostrar senha</label>
         <button class="btn btn-primario btn-bloco" type="submit">Criar loja e entrar</button>
       </form>
@@ -575,13 +580,13 @@ function telaConfiguracao() {
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const d = lerFormulario(form);
-    if (!mostrarErros(form, { ...validarLoja(d), ...validarAcesso(d, { exigirPin: true }) })) return;
+    if (!mostrarErros(form, { ...validarLoja(d), ...validarAcesso(d, { exigirPin: true, exigirEmail: true }) })) return;
     let dono, novaLoja;
     const ok = await executar(async () => {
       novaLoja = await API.criar('loja', { ...dadosLoja(d), codigo: gerarCodigoLoja() });
       const sal = novoSal();
       dono = await API.criar('usuario', {
-        nome: d.nome, login: normalizar(d.login), papel: 'dono', ativo: true, loja_id: novaLoja.id,
+        nome: d.nome, login: normalizar(d.login), email: d.email.toLowerCase(), papel: 'dono', ativo: true, loja_id: novaLoja.id,
         permissoes: PERMISSOES.map(p => p.chave), pin_sal: sal, pin_hash: hashPin(d.pin, sal), origem: 'configuracao'
       });
     });
@@ -629,7 +634,7 @@ function telaPedidoAcesso() {
     }
     const sal = novoSal();
     const ok = await executar(() => API.criar('usuario', {
-      nome: d.nome, login: normalizar(d.login), papel: 'funcionario', ativo: false, pendente: true, loja_id: lojaAlvo.id,
+      nome: d.nome, login: normalizar(d.login), email: (d.email || '').toLowerCase(), papel: 'funcionario', ativo: false, pendente: true, loja_id: lojaAlvo.id,
       permissoes: [], pin_sal: sal, pin_hash: hashPin(d.pin, sal), origem: 'tela_entrada'
     }));
     if (!ok) return;
@@ -644,7 +649,10 @@ function telaLogin() {
   esconderEstrutura();
   const aba = estado.abaEntrada || 'entrar';
   if (aba === 'cadastrar') return estado.tipoCadastro === 'funcionario' ? telaPedidoAcesso() : telaConfiguracao();
+  if (aba === 'recuperar') return telaRecuperar();
   document.title = `Entrar · ${CONFIG.APP_NOME}`;
+  const loginSugerido = estado.loginSugerido || '';
+  estado.loginSugerido = '';
   conteudo.innerHTML = `
     <div class="tela-entrada">
       ${marca('Controle de Fiado')}
@@ -652,20 +660,25 @@ function telaLogin() {
         ${abasEntrada('entrar')}
         ${estado.avisoEntrada ? `<div class="aviso-faixa info">${IC.check}<span>${esc(estado.avisoEntrada)}</span></div>` : ''}
         <form id="form" novalidate>
-          ${campo({ rotulo: 'Usuário', nome: 'login', obrig: true, attrs: 'autocapitalize="none" autocomplete="username"' })}
+          ${campo({ rotulo: 'Usuário', nome: 'login', valor: loginSugerido, obrig: true, attrs: 'autocapitalize="none" autocomplete="username"' })}
           ${campo({ rotulo: 'Senha', nome: 'pin', tipo: 'password', obrig: true, attrs: 'maxlength="20" autocomplete="current-password"' })}
           <label class="check" style="border:0;margin:-8px 0 8px"><input type="checkbox" id="mostrar-senha"> Mostrar senha</label>
           <button class="btn btn-primario btn-bloco" type="submit">Entrar</button>
         </form>
+        <button type="button" class="btn btn-texto btn-bloco" id="btn-esqueci" style="margin-top:8px">Esqueci minha senha</button>
         <p class="dica cor-suave" style="text-align:center;margin:16px 0 0"><strong>Ainda não tem conta?</strong> Toque em <strong>Cadastrar</strong> para criar sua loja ou pedir acesso como funcionário.</p>
-        <p class="dica cor-suave" style="text-align:center;margin:8px 0 0"><strong>Esqueceu a senha?</strong> Peça ao dono da loja para redefinir.</p>
       </div>
     </div>`;
   estado.avisoEntrada = '';
   ligarAbasEntrada();
   const form = $('#form');
   ligarMostrarSenha(form);
-  form.login.focus();
+  (loginSugerido ? form.pin : form.login).focus();
+  $('#btn-esqueci').addEventListener('click', () => {
+    estado.abaEntrada = 'recuperar';
+    estado.recuperar = { etapa: 1, login: normalizar(form.login.value) };
+    telaLogin();
+  });
   form.addEventListener('submit', e => {
     e.preventDefault();
     const d = lerFormulario(form);
@@ -677,6 +690,97 @@ function telaLogin() {
     if (u.pendente) { mostrarErros(form, { login: 'Seu pedido de acesso está aguardando a aprovação do dono da loja.' }); return; }
     if (u.ativo === false) { mostrarErros(form, { login: 'Este acesso está desativado. Fale com o dono da loja.' }); return; }
     entrar(u);
+  });
+}
+
+/* Esqueci minha senha: código de 6 números enviado ao e-mail cadastrado */
+function telaRecuperar() {
+  esconderEstrutura();
+  document.title = `Recuperar senha · ${CONFIG.APP_NOME}`;
+  const r = estado.recuperar || (estado.recuperar = { etapa: 1, login: '' });
+  const voltar = () => { estado.abaEntrada = 'entrar'; estado.recuperar = null; telaLogin(); };
+  // erros de servidor aparecem no campo certo, sem tirar a pessoa da tela
+  const tentar = async (form, campoErro, fn) => {
+    carregando(true);
+    try { await fn(); return true; }
+    catch (e) { mostrarErros(form, { [campoErro]: e.message || 'Algo deu errado. Tente novamente.' }); return false; }
+    finally { carregando(false); }
+  };
+
+  if (r.etapa === 1) {
+    conteudo.innerHTML = `
+      <div class="tela-entrada">
+        ${marca('Controle de Fiado')}
+        <form id="form" class="cartao" novalidate>
+          <h2 class="titulo-cartao">Recuperar senha</h2>
+          <p class="dica cor-suave" style="margin:0 0 16px">Digite o seu usuário. Vamos enviar um código de 6 números para o e-mail cadastrado.</p>
+          ${campo({ rotulo: 'Usuário', nome: 'login', valor: r.login, obrig: true, attrs: 'autocapitalize="none" autocomplete="username"' })}
+          <button class="btn btn-primario btn-bloco" type="submit">Enviar código</button>
+          <button type="button" class="btn btn-texto btn-bloco" id="btn-voltar" style="margin-top:8px">Voltar para Entrar</button>
+        </form>
+      </div>`;
+    const form = $('#form');
+    form.login.focus();
+    $('#btn-voltar').addEventListener('click', voltar);
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const login = normalizar(lerFormulario(form).login);
+      if (!login) { mostrarErros(form, { login: 'Informe o seu usuário.' }); return; }
+      let resp;
+      if (!await tentar(form, 'login', async () => { resp = await API.pedirCodigoSenha(login); })) return;
+      estado.recuperar = { etapa: 2, login, email: resp.email, codigoTeste: resp.codigo_teste || '' };
+      telaRecuperar();
+    });
+    return;
+  }
+
+  conteudo.innerHTML = `
+    <div class="tela-entrada">
+      ${marca('Controle de Fiado')}
+      <form id="form" class="cartao" novalidate>
+        <h2 class="titulo-cartao">Criar senha nova</h2>
+        <div class="aviso-faixa info">${IC.check}<span>Enviamos um código para <strong>${esc(r.email)}</strong>. Confira também a caixa de spam. Ele vale por 15 minutos.</span></div>
+        ${r.codigoTeste ? `<div class="aviso-faixa alerta">${IC.alerta}<span><strong>Modo de teste (sem planilha):</strong> nenhum e-mail é enviado. Código: <strong>${esc(r.codigoTeste)}</strong></span></div>` : ''}
+        ${campo({ rotulo: 'Código do e-mail', nome: 'codigo', obrig: true, attrs: 'inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" class="campo-codigo"' })}
+        <div class="linha-2">
+          ${campo({ rotulo: 'Nova senha', nome: 'pin', tipo: 'password', obrig: true, attrs: 'maxlength="20" autocomplete="new-password"', dica: 'Mínimo 4 caracteres' })}
+          ${campo({ rotulo: 'Confirmar senha', nome: 'pin2', tipo: 'password', obrig: true, attrs: 'maxlength="20" autocomplete="new-password"' })}
+        </div>
+        <label class="check" style="border:0;margin:-8px 0 8px"><input type="checkbox" id="mostrar-senha"> Mostrar senha</label>
+        <button class="btn btn-primario btn-bloco" type="submit">Salvar nova senha</button>
+        <div class="acoes" style="margin-top:8px">
+          <button type="button" class="btn btn-texto" id="btn-reenviar">Reenviar código</button>
+          <button type="button" class="btn btn-texto" id="btn-voltar">Voltar para Entrar</button>
+        </div>
+      </form>
+    </div>`;
+  const form = $('#form');
+  ligarMostrarSenha(form);
+  form.codigo.focus();
+  $('#btn-voltar').addEventListener('click', voltar);
+  $('#btn-reenviar').addEventListener('click', async () => {
+    let resp;
+    if (!await tentar(form, 'codigo', async () => { resp = await API.pedirCodigoSenha(r.login); })) return;
+    estado.recuperar = { ...r, email: resp.email, codigoTeste: resp.codigo_teste || '' };
+    toast('Código reenviado!', 'ok');
+    telaRecuperar();
+  });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const d = lerFormulario(form);
+    const codigo = String(d.codigo || '').replace(/\D/g, '');
+    const erros = {};
+    if (codigo.length !== 6) erros.codigo = 'Digite os 6 números que chegaram no e-mail.';
+    if (!/^\S{4,20}$/.test(d.pin || '')) erros.pin = 'A senha deve ter de 4 a 20 caracteres, sem espaços.';
+    else if (d.pin !== d.pin2) erros.pin2 = 'As senhas não são iguais.';
+    if (!mostrarErros(form, erros)) return;
+    const sal = novoSal();
+    if (!await tentar(form, 'codigo', () => API.trocarSenhaComCodigo(r.login, codigo, sal, hashPin(d.pin, sal)))) return;
+    estado.recuperar = null;
+    estado.abaEntrada = 'entrar';
+    estado.loginSugerido = r.login;
+    estado.avisoEntrada = 'Senha alterada! Entre com a senha nova. Seus dados continuam todos aqui.';
+    telaLogin();
   });
 }
 
@@ -760,6 +864,10 @@ function telaInicio() {
       ${pode('clientes_criar') ? `<a class="btn btn-primario" href="#/clientes/novo">${IC.mais} Novo cliente</a>` : ''}
       ${pode('clientes_ver') ? `<a class="btn btn-secundario" href="#/clientes">${IC.busca} Buscar cliente</a>` : ''}
     </div>
+
+    ${u.papel === 'dono' && !u.email ? `
+      <a class="aviso-faixa alerta" href="#/equipe/${u.id}/editar" style="text-decoration:none">${IC.alerta}
+        <span><strong>Cadastre o seu e-mail.</strong> Assim você consegue recuperar a senha sozinho se esquecer. Toque aqui.</span></a>` : ''}
 
     ${pode('equipe_gerenciar') && pendentes().length ? `
       <a class="aviso-faixa info" href="#/equipe" style="text-decoration:none">${IC.pessoas}
@@ -1949,7 +2057,7 @@ function telaFuncionarioForm(id, focarSenha = false) {
     <form id="form" novalidate>
       ${aprovando ? `<div class="aviso-faixa alerta">${IC.relogio}<span><strong>${esc(u.nome)} pediu acesso pela tela de entrada.</strong> Confira os dados, escolha as permissões e toque em Aprovar acesso.</span></div>` : ''}
       <div class="cartao">
-        ${camposAcesso(u || {}, { pinOpcional: editando })}
+        ${camposAcesso(u || {}, { pinOpcional: editando, email: ehDono ? 'obrig' : 'opcional' })}
         ${!ehDono && !aprovando ? `<label class="check"><input type="checkbox" name="ativo" ${u?.ativo === false ? '' : 'checked'} ${souEu ? 'disabled' : ''}> Acesso ativo</label>` : ''}
       </div>
       ${!ehDono ? `
@@ -1978,11 +2086,11 @@ function telaFuncionarioForm(id, focarSenha = false) {
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const d = lerFormulario(form);
-    if (!mostrarErros(form, validarAcesso(d, { exigirPin: !editando, idAtual: id }))) return;
+    if (!mostrarErros(form, validarAcesso(d, { exigirPin: !editando, idAtual: id, exigirEmail: ehDono }))) return;
     const permissoes = $$('input[name="perm"]:checked', form).map(c => c.value);
     if (!ehDono && podeMudarPermissoes && !permissoes.length) { toast('Marque pelo menos uma permissão.', 'erro'); return; }
 
-    const dados = { nome: d.nome, login: normalizar(d.login) };
+    const dados = { nome: d.nome, login: normalizar(d.login), email: (d.email || '').toLowerCase() };
     if (!ehDono) {
       if (podeMudarPermissoes) dados.permissoes = permissoes;
       if (aprovando) { dados.ativo = true; dados.pendente = false; dados.aprovado_por = estado.usuario.nome; dados.aprovado_em = new Date().toISOString(); }
