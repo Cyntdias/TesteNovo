@@ -19,6 +19,15 @@ const API = (() => {
   const CHAVE_LOCAL = 'caderneta_db_v1';
   let registros = [];          // cópia em memória de tudo que veio do banco
   let ultimaLeitura = 0;
+  let lojaAtual = null;        // várias lojas no mesmo banco: o app só enxerga a loja de quem entrou
+
+  // Dados antigos (de quando havia uma loja só) não têm loja_id: passam a ser da loja antiga
+  function completarLojaId() {
+    const semLoja = registros.filter(r => !r.loja_id);
+    if (!semLoja.length) return;
+    const lojaAntiga = registros.find(r => r.tabela === 'loja' && (!r.loja_id || r.loja_id === r.id));
+    if (lojaAntiga) semLoja.forEach(r => { r.loja_id = r.tabela === 'loja' ? r.id : lojaAntiga.id; });
+  }
 
   const modoMake = () => CONFIG.MODO === 'make';
   const modoSheets = () => CONFIG.MODO === 'sheets';
@@ -89,17 +98,26 @@ const API = (() => {
     } else {
       registros = lerLocal();
     }
+    completarLojaId();
     ultimaLeitura = Date.now();
     return registros;
   }
 
-  const listar = tabela => registros.filter(r => r.tabela === tabela);
-  const obter = id => registros.find(r => r.id === id) || null;
+  const daLoja = r => r.loja_id === lojaAtual;
+  // listar/obter: só a loja de quem está logado. listarTodos/obterQualquer: todas (login e cadastro).
+  const listar = tabela => registros.filter(r => r.tabela === tabela && daLoja(r));
+  const obter = id => registros.find(r => r.id === id && daLoja(r)) || null;
+  const listarTodos = tabela => registros.filter(r => r.tabela === tabela);
+  const obterQualquer = id => registros.find(r => r.id === id) || null;
+  const definirLoja = id => { lojaAtual = id || null; };
 
   /* ---------- CREATE ---------- */
   async function criar(tabela, dados) {
     const agora = new Date().toISOString();
-    const registro = { ...dados, id: gerarId(), tabela, criado_em: agora, atualizado_em: agora };
+    const id = gerarId();
+    const loja_id = tabela === 'loja' ? id : (dados.loja_id || lojaAtual);
+    if (!loja_id) throw new Error('Nenhuma loja selecionada.');
+    const registro = { ...dados, id, tabela, loja_id, criado_em: agora, atualizado_em: agora };
     if (remoto()) {
       await chamar('create', { id: registro.id, tabela, dados: JSON.stringify(registro) });
     }
@@ -110,7 +128,7 @@ const API = (() => {
 
   /* ---------- UPDATE ---------- */
   async function atualizar(id, mudancas) {
-    const atual = obter(id);
+    const atual = obterQualquer(id);
     if (!atual) throw new Error('Registro não encontrado. Toque em atualizar e tente de novo.');
     const registro = { ...atual, ...mudancas, id, tabela: atual.tabela, atualizado_em: new Date().toISOString() };
     if (remoto()) {
@@ -129,7 +147,8 @@ const API = (() => {
   }
 
   return {
-    carregar, listar, obter, criar, atualizar, excluir,
+    carregar, listar, obter, listarTodos, obterQualquer, definirLoja, criar, atualizar, excluir,
+    get lojaAtual() { return lojaAtual; },
     get ultimaLeitura() { return ultimaLeitura; },
     // "Impressão digital" dos dados: muda quando algo é criado, editado ou excluído
     assinatura: () => registros.map(r => `${r.id}:${r.atualizado_em}`).sort().join('|'),
