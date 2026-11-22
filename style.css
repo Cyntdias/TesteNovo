@@ -364,3 +364,7 @@ a.item:hover, button.item:hover { background: #F8FAFC; cursor: pointer; }
   .cabecalho-impressao { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 2px solid var(--primaria); }
   .cabecalho-impressao img { width: 64px; height: 64px; object-fit: contain; }
 }
+
+/* Recuperar senha */
+.titulo-cartao { font-size: var(--t-lg); font-weight: 700; margin: 0 0 var(--e2); }
+.campo input.campo-codigo { font-size: 24px; font-weight: 700; letter-spacing: .4em; text-align: center; }
