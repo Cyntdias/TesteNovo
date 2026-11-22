@@ -503,7 +503,7 @@ function validarAcesso(d, { exigirPin, idAtual = null }) {
   if (!d.nome || d.nome.length < 2) erros.nome = 'Informe o nome.';
   const login = normalizar(d.login);
   if (!/^[a-z0-9._-]{3,20}$/.test(login)) erros.login = 'De 3 a 20 caracteres: letras, números, ponto, hífen ou _.';
-  else if (usuarios().some(u => u.login === login && u.id !== idAtual)) erros.login = 'Esse usuário já existe.';
+  else if (API.listarTodos('usuario').some(u => u.login === login && u.id !== idAtual)) erros.login = 'Esse usuário já existe. Escolha outro.';
   if (exigirPin || d.pin) {
     if (!/^\S{4,20}$/.test(d.pin || '')) erros.pin = 'A senha deve ter de 4 a 20 caracteres, sem espaços.';
     else if (d.pin !== d.pin2) erros.pin2 = 'As senhas não são iguais.';
@@ -518,150 +518,186 @@ const camposAcesso = (u = {}, { pinOpcional = false } = {}) => `
     ${campo({ rotulo: 'Confirmar senha', nome: 'pin2', tipo: 'password', obrig: !pinOpcional, attrs: 'maxlength="20" autocomplete="new-password"' })}
   </div>`;
 
-/* ===================== TELA: Configuração inicial (cadastro da loja) ===================== */
-function telaConfiguracao() {
-  esconderEstrutura();
-  document.title = `Cadastrar loja · ${CONFIG.APP_NOME}`;
-  const lojaExistente = loja(); // caso a configuração tenha sido interrompida no meio
-  conteudo.innerHTML = `
-    <div class="tela-entrada">
-      ${marca('Controle de fiado da sua loja')}
-      <form id="form" class="cartao" novalidate>
-        ${abasEntrada('cadastrar')}
-        <p class="dica cor-suave" style="margin:0 0 16px">Primeiro acesso: cadastre a sua loja e crie o seu acesso de dono. Depois, os funcionários pedem acesso pela aba Cadastrar.</p>
-        <h2 class="secao-titulo">1. Dados da loja</h2>
-        ${camposLoja(lojaExistente || {})}
-        <h2 class="secao-titulo">2. Seu acesso (dono)</h2>
-        ${camposAcesso()}
-        <button class="btn btn-primario btn-bloco" type="submit">Criar loja e entrar</button>
-      </form>
-      <p class="dica cor-suave" style="text-align:center">Banco de dados: ${esc(API.modo)}</p>
-    </div>`;
-  ligarAbasEntrada();
-  const form = $('#form');
-  mascararTelefone(form.loja_telefone);
-  prepararLogo(form);
-  form.addEventListener('submit', async e => {
-    e.preventDefault();
-    const d = lerFormulario(form);
-    if (!mostrarErros(form, { ...validarLoja(d), ...validarAcesso(d, { exigirPin: true }) })) return;
-    let dono;
-    const ok = await executar(async () => {
-      if (lojaExistente) await API.atualizar(lojaExistente.id, dadosLoja(d));
-      else await API.criar('loja', dadosLoja(d));
-      const sal = novoSal();
-      dono = await API.criar('usuario', {
-        nome: d.nome, login: normalizar(d.login), papel: 'dono', ativo: true,
-        permissoes: PERMISSOES.map(p => p.chave), pin_sal: sal, pin_hash: hashPin(d.pin, sal), origem: 'configuracao'
-      });
-    });
-    if (!ok) return;
-    estado.abaEntrada = 'entrar';
-    entrar(dono);
-    toast('Loja criada com sucesso!', 'ok');
-  });
+/* ===================== Entrada: abas Entrar / Cadastrar ===================== */
+/* Código da loja: os funcionários usam para pedir acesso (6 letras/números) */
+const codigoLoja = l => (l ? (l.codigo || String(l.id).slice(-6).toUpperCase()) : '');
+function gerarCodigoLoja() {
+  const letras = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // sem O/0, I/1/L para não confundir
+  const usados = new Set(API.listarTodos('loja').map(codigoLoja));
+  let cod;
+  do { cod = Array.from({ length: 6 }, () => letras[Math.floor(Math.random() * letras.length)]).join(''); } while (usados.has(cod));
+  return cod;
 }
-
-/* ===================== TELA: Entrada (abas Entrar / Cadastrar) ===================== */
-const semLoja = () => !loja() || !usuarios().some(u => u.papel === 'dono');
 function abasEntrada(aba) {
   return `
     <div class="segmentado" role="tablist" aria-label="Entrar ou cadastrar">
       ${[['entrar', 'Entrar'], ['cadastrar', 'Cadastrar']].map(([v, r]) => `<button type="button" role="tab" data-aba="${v}" class="${aba === v ? 'ativo' : ''}" aria-selected="${aba === v}">${r}</button>`).join('')}
     </div>`;
 }
+function escolhaCadastro(tipo) {
+  return `
+    <div class="campo">
+      <span class="rotulo">Quem é você?</span>
+      <div class="segmentado segmentado-destaque" role="radiogroup" aria-label="Tipo de cadastro" style="margin:0">
+        <button type="button" role="radio" data-tipo="dono" class="${tipo === 'dono' ? 'ativo' : ''}" aria-checked="${tipo === 'dono'}">Criar minha loja</button>
+        <button type="button" role="radio" data-tipo="funcionario" class="${tipo === 'funcionario' ? 'ativo' : ''}" aria-checked="${tipo === 'funcionario'}">Sou funcionário</button>
+      </div>
+    </div>`;
+}
 function ligarAbasEntrada() {
   $$('[data-aba]').forEach(b => b.addEventListener('click', () => { estado.abaEntrada = b.dataset.aba; rotear(); }));
+  $$('[data-tipo]').forEach(b => b.addEventListener('click', () => { estado.tipoCadastro = b.dataset.tipo; rotear(); }));
+}
+function ligarMostrarSenha(form) {
+  $('#mostrar-senha')?.addEventListener('change', e => {
+    $$('input[name="pin"], input[name="pin2"]', form).forEach(i => { i.type = e.target.checked ? 'text' : 'password'; });
+  });
 }
 
+/* Cadastrar → Criar minha loja: cria a loja e o acesso de dono */
+function telaConfiguracao() {
+  esconderEstrutura();
+  document.title = `Criar loja · ${CONFIG.APP_NOME}`;
+  conteudo.innerHTML = `
+    <div class="tela-entrada">
+      ${marca('Controle de fiado')}
+      <form id="form" class="cartao" novalidate>
+        ${abasEntrada('cadastrar')}
+        ${escolhaCadastro('dono')}
+        <h2 class="secao-titulo">1. Dados da loja</h2>
+        ${camposLoja({})}
+        <h2 class="secao-titulo">2. Seu acesso (dono)</h2>
+        ${camposAcesso()}
+        <label class="check" style="border:0;margin:-8px 0 8px"><input type="checkbox" id="mostrar-senha"> Mostrar senha</label>
+        <button class="btn btn-primario btn-bloco" type="submit">Criar loja e entrar</button>
+      </form>
+    </div>`;
+  ligarAbasEntrada();
+  const form = $('#form');
+  ligarMostrarSenha(form);
+  mascararTelefone(form.loja_telefone);
+  prepararLogo(form);
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const d = lerFormulario(form);
+    if (!mostrarErros(form, { ...validarLoja(d), ...validarAcesso(d, { exigirPin: true }) })) return;
+    let dono, novaLoja;
+    const ok = await executar(async () => {
+      novaLoja = await API.criar('loja', { ...dadosLoja(d), codigo: gerarCodigoLoja() });
+      const sal = novoSal();
+      dono = await API.criar('usuario', {
+        nome: d.nome, login: normalizar(d.login), papel: 'dono', ativo: true, loja_id: novaLoja.id,
+        permissoes: PERMISSOES.map(p => p.chave), pin_sal: sal, pin_hash: hashPin(d.pin, sal), origem: 'configuracao'
+      });
+    });
+    if (!ok) return;
+    estado.abaEntrada = 'entrar';
+    estado.tipoCadastro = 'dono';
+    entrar(dono);
+    toast(`Loja criada! Código para os funcionários: ${codigoLoja(novaLoja)}`, 'ok');
+  });
+}
+
+/* Cadastrar → Sou funcionário: pede acesso com o código da loja */
+function telaPedidoAcesso() {
+  esconderEstrutura();
+  document.title = `Pedir acesso · ${CONFIG.APP_NOME}`;
+  conteudo.innerHTML = `
+    <div class="tela-entrada">
+      ${marca('Controle de fiado')}
+      <form id="form" class="cartao" novalidate>
+        ${abasEntrada('cadastrar')}
+        ${escolhaCadastro('funcionario')}
+        ${campo({ rotulo: 'Código da loja', nome: 'codigo', obrig: true, attrs: 'maxlength="6" autocapitalize="characters" autocomplete="off" placeholder="Ex.: K3X9QA" style="text-transform:uppercase;letter-spacing:.15em;font-weight:600"', dica: 'Peça o código ao dono da loja.' })}
+        ${camposAcesso({})}
+        <label class="check" style="border:0;margin:-8px 0 8px"><input type="checkbox" id="mostrar-senha"> Mostrar senha</label>
+        <button class="btn btn-primario btn-bloco" type="submit">Pedir acesso</button>
+      </form>
+    </div>`;
+  ligarAbasEntrada();
+  const form = $('#form');
+  ligarMostrarSenha(form);
+  form.codigo.focus();
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const d = lerFormulario(form);
+    const codigo = String(d.codigo || '').trim().toUpperCase();
+    const lojaAlvo = API.listarTodos('loja').find(l => codigoLoja(l) === codigo);
+    const erros = validarAcesso(d, { exigirPin: true });
+    if (!codigo) erros.codigo = 'Informe o código da loja.';
+    else if (!lojaAlvo) erros.codigo = 'Código não encontrado. Confira com o dono da loja.';
+    if (!mostrarErros(form, erros)) return;
+    const equipe = API.listarTodos('usuario').filter(u => u.loja_id === lojaAlvo.id && u.papel !== 'dono');
+    if (equipe.length >= CONFIG.MAX_FUNCIONARIOS) {
+      mostrarErros(form, { codigo: `Essa loja já tem ${CONFIG.MAX_FUNCIONARIOS} funcionários. Fale com o dono.` });
+      return;
+    }
+    const sal = novoSal();
+    const ok = await executar(() => API.criar('usuario', {
+      nome: d.nome, login: normalizar(d.login), papel: 'funcionario', ativo: false, pendente: true, loja_id: lojaAlvo.id,
+      permissoes: [], pin_sal: sal, pin_hash: hashPin(d.pin, sal), origem: 'tela_entrada'
+    }));
+    if (!ok) return;
+    estado.abaEntrada = 'entrar';
+    estado.avisoEntrada = `Pedido enviado, ${d.nome.split(' ')[0]}! Assim que o dono aprovar, entre com o usuário "${normalizar(d.login)}".`;
+    telaLogin();
+  });
+}
+
+/* Entrar: usuário e senha (vale para qualquer loja) */
 function telaLogin() {
   esconderEstrutura();
   const aba = estado.abaEntrada || 'entrar';
-  // Primeiro acesso (sem loja): a aba Cadastrar é o cadastro da loja e do dono
-  if (aba === 'cadastrar' && semLoja()) return telaConfiguracao();
-  const primeiroAcesso = semLoja();
-  document.title = `${aba === 'entrar' ? 'Entrar' : 'Cadastrar'} · ${CONFIG.APP_NOME}`;
+  if (aba === 'cadastrar') return estado.tipoCadastro === 'funcionario' ? telaPedidoAcesso() : telaConfiguracao();
+  document.title = `Entrar · ${CONFIG.APP_NOME}`;
   conteudo.innerHTML = `
     <div class="tela-entrada">
-      ${marca(primeiroAcesso ? 'Controle de fiado da sua loja' : loja().nome)}
+      ${marca('Controle de fiado')}
       <div class="cartao">
-        ${abasEntrada(aba)}
-        ${primeiroAcesso ? `<div class="aviso-faixa info">${IC.loja}<span><strong>Primeiro acesso?</strong> Toque em <strong>Cadastrar</strong> para criar sua loja e o seu acesso de dono.</span></div>` : ''}
+        ${abasEntrada('entrar')}
         ${estado.avisoEntrada ? `<div class="aviso-faixa info">${IC.check}<span>${esc(estado.avisoEntrada)}</span></div>` : ''}
-        ${aba === 'entrar' ? `
         <form id="form" novalidate>
           ${campo({ rotulo: 'Usuário', nome: 'login', obrig: true, attrs: 'autocapitalize="none" autocomplete="username"' })}
           ${campo({ rotulo: 'Senha', nome: 'pin', tipo: 'password', obrig: true, attrs: 'maxlength="20" autocomplete="current-password"' })}
           <label class="check" style="border:0;margin:-8px 0 8px"><input type="checkbox" id="mostrar-senha"> Mostrar senha</label>
           <button class="btn btn-primario btn-bloco" type="submit">Entrar</button>
         </form>
-        <p class="dica cor-suave" style="text-align:center;margin:16px 0 0"><strong>Esqueceu a senha?</strong> Peça ao dono da loja para redefinir.</p>`
-        : `
-        <form id="form" novalidate>
-          <p class="dica cor-suave" style="margin:0 0 16px">É funcionário da loja? Crie seu acesso. O dono vai aprovar e escolher o que você pode fazer no app.</p>
-          ${camposAcesso({})}
-          <label class="check" style="border:0;margin:-8px 0 8px"><input type="checkbox" id="mostrar-senha"> Mostrar senha</label>
-          <button class="btn btn-primario btn-bloco" type="submit">Enviar cadastro</button>
-        </form>`}
+        <p class="dica cor-suave" style="text-align:center;margin:16px 0 0"><strong>Ainda não tem conta?</strong> Toque em <strong>Cadastrar</strong> para criar sua loja ou pedir acesso como funcionário.</p>
+        <p class="dica cor-suave" style="text-align:center;margin:8px 0 0"><strong>Esqueceu a senha?</strong> Peça ao dono da loja para redefinir.</p>
       </div>
     </div>`;
   estado.avisoEntrada = '';
-
   ligarAbasEntrada();
   const form = $('#form');
-  $('#mostrar-senha').addEventListener('change', e => {
-    $$('input[name="pin"], input[name="pin2"]', form).forEach(i => { i.type = e.target.checked ? 'text' : 'password'; });
-  });
-  (aba === 'entrar' ? form.login : form.nome).focus();
-
-  if (aba === 'entrar') {
-    form.addEventListener('submit', e => {
-      e.preventDefault();
-      const d = lerFormulario(form);
-      if (primeiroAcesso) {
-        mostrarErros(form, { login: 'Ainda não há nenhuma loja cadastrada. Toque em Cadastrar para criar a sua.' });
-        return;
-      }
-      const u = usuarios().find(x => x.login === normalizar(d.login));
-      if (!u || hashPin(d.pin, u.pin_sal) !== u.pin_hash) {
-        mostrarErros(form, { pin: 'Usuário ou senha incorretos.' });
-        return;
-      }
-      if (u.pendente) { mostrarErros(form, { login: 'Seu cadastro está aguardando a aprovação do dono da loja.' }); return; }
-      if (u.ativo === false) { mostrarErros(form, { login: 'Este acesso está desativado. Fale com o dono da loja.' }); return; }
-      entrar(u);
-    });
-    return;
-  }
-
-  // Cadastro feito pelo próprio funcionário: fica pendente até o dono aprovar
-  form.addEventListener('submit', async e => {
+  ligarMostrarSenha(form);
+  form.login.focus();
+  form.addEventListener('submit', e => {
     e.preventDefault();
     const d = lerFormulario(form);
-    if (!mostrarErros(form, validarAcesso(d, { exigirPin: true }))) return;
-    if (funcionarios().length >= CONFIG.MAX_FUNCIONARIOS) {
-      toast(`A loja já tem ${CONFIG.MAX_FUNCIONARIOS} funcionários cadastrados. Fale com o dono.`, 'erro');
+    const u = API.listarTodos('usuario').find(x => x.login === normalizar(d.login));
+    if (!u || hashPin(d.pin, u.pin_sal) !== u.pin_hash) {
+      mostrarErros(form, { pin: 'Usuário ou senha incorretos.' });
       return;
     }
-    const sal = novoSal();
-    const ok = await executar(() => API.criar('usuario', {
-      nome: d.nome, login: normalizar(d.login), papel: 'funcionario', ativo: false, pendente: true,
-      permissoes: [], pin_sal: sal, pin_hash: hashPin(d.pin, sal), origem: 'tela_entrada'
-    }));
-    if (!ok) return;
-    estado.abaEntrada = 'entrar';
-    estado.avisoEntrada = `Cadastro enviado, ${d.nome.split(' ')[0]}! Assim que o dono aprovar, entre com o usuário "${normalizar(d.login)}".`;
-    telaLogin();
+    if (u.pendente) { mostrarErros(form, { login: 'Seu pedido de acesso está aguardando a aprovação do dono da loja.' }); return; }
+    if (u.ativo === false) { mostrarErros(form, { login: 'Este acesso está desativado. Fale com o dono da loja.' }); return; }
+    entrar(u);
   });
 }
 
 function entrar(usuario) {
+  API.definirLoja(usuario.loja_id);
   estado.usuario = usuario;
   try { sessao.setItem(CHAVE_SESSAO, usuario.id); } catch { /* modo privado */ }
   // registra o último acesso (sem travar a entrada se a internet falhar)
   API.atualizar(usuario.id, { ultimo_acesso: new Date().toISOString() })
     .then(u => { if (estado.usuario?.id === u.id) estado.usuario = u; })
     .catch(e => console.warn('Último acesso não registrado', e));
+  // lojas criadas antes do código: o master ganha um código sem letras parecidas
+  const l = loja();
+  if (l && !l.codigo && usuario.papel === 'dono') {
+    API.atualizar(l.id, { codigo: gerarCodigoLoja() }).catch(e => console.warn('Código da loja não salvo', e));
+  }
   location.hash = '#/inicio';
   rotear();
   avisarVencidosAoEntrar();
@@ -669,6 +705,7 @@ function entrar(usuario) {
 
 function sair() {
   estado.usuario = null;
+  API.definirLoja(null);
   estado.abaEntrada = 'entrar'; // ao sair, a tela de entrada sempre abre na aba Entrar
   try { sessao.removeItem(CHAVE_SESSAO); } catch { /* ignore */ }
   location.hash = '';
@@ -679,8 +716,9 @@ function sair() {
 function sincronizarUsuario() {
   let id = estado.usuario?.id;
   if (!id) { try { id = sessao.getItem(CHAVE_SESSAO); } catch { id = null; } }
-  const u = id ? API.obter(id) : null;
-  estado.usuario = u && u.tabela === 'usuario' && u.ativo !== false ? u : null;
+  const u = id ? API.obterQualquer(id) : null;
+  estado.usuario = u && u.tabela === 'usuario' && u.ativo !== false && !u.pendente ? u : null;
+  API.definirLoja(estado.usuario ? estado.usuario.loja_id : null);
 }
 
 /* ===================== TELA: Início (Home) ===================== */
@@ -1626,10 +1664,10 @@ function telaMais() {
     <div class="cartao" style="display:flex;align-items:center;gap:12px">
       <div class="avatar">${esc(iniciais(u.nome))}</div>
       <div class="item-corpo"><div class="item-titulo">${esc(u.nome)}</div>
-        <div class="item-sub">@${esc(u.login)} · ${u.papel === 'dono' ? 'Dono' : 'Funcionário'}</div></div>
+        <div class="item-sub">@${esc(u.login)} · ${u.papel === 'dono' ? 'Master (dono)' : 'Funcionário'}</div></div>
     </div>
     <div class="lista">
-      ${pode('equipe_gerenciar') ? link('#/equipe', IC.pessoas, 'Funcionários e permissões', pendentes().length ? `<strong class="cor-alerta">${pendentes().length} aguardando aprovação</strong>` : `${funcionarios().length} de ${CONFIG.MAX_FUNCIONARIOS} cadastrados`) : ''}
+      ${pode('equipe_gerenciar') ? link('#/equipe', IC.pessoas, `Funcionários e permissões · código ${codigoLoja(loja())}`, pendentes().length ? `<strong class="cor-alerta">${pendentes().length} aguardando aprovação</strong>` : `${funcionarios().length} de ${CONFIG.MAX_FUNCIONARIOS} cadastrados`) : ''}
       ${pode('loja_editar') ? link('#/loja', logoValido(loja().logo) ? `<img class="icone-logo" src="${esc(loja().logo)}" alt="">` : IC.loja, 'Dados da loja e logo', esc(loja().nome)) : ''}
       ${pode('equipe_gerenciar') ? link('#/cadastros', IC.relogio, 'Registro de cadastros', 'Quem se cadastrou, quando e último acesso') : ''}
       ${link('', IC.atualizar, 'Atualizar dados', 'Buscar as últimas alterações da equipe', 'btn-sync')}
@@ -1647,6 +1685,16 @@ function telaMais() {
       ? 'No Safari, toque no botão Compartilhar (quadrado com seta) e depois em "Adicionar à Tela de Início".'
       : 'No Chrome, abra o menu (⋮) e toque em "Instalar app" ou "Adicionar à tela inicial".');
   };
+}
+
+/* Cartão com o código da loja (para o master passar aos funcionários) */
+function cartaoCodigoLoja() {
+  const cod = codigoLoja(loja());
+  return `
+    <div class="cartao codigo-loja">
+      <div><div class="rotulo">Código da loja</div><div class="codigo">${cod}</div></div>
+      <p class="dica cor-suave" style="margin:0">Passe este código para seus funcionários. Na tela de entrada, eles tocam em <strong>Cadastrar → Sou funcionário</strong> e pedem acesso. Você aprova aqui.</p>
+    </div>`;
 }
 
 /* ===================== TELA: Equipe (listagem de funcionários) ===================== */
@@ -1668,13 +1716,14 @@ function telaEquipe() {
         <div class="item-titulo">${esc(u.nome)}</div>
         <div class="item-sub">@${esc(u.login)} · ${u.papel === 'dono' ? 'todas as permissões' : u.pendente ? 'aguardando aprovação' : `${(u.permissoes || []).length} permissão(ões)`}</div>
       </div>
-      ${u.papel === 'dono' ? '<span class="etiqueta sucesso">Dono</span>' : u.pendente ? '<span class="etiqueta alerta">Aprovar</span>' : u.ativo === false ? '<span class="etiqueta neutra">Inativo</span>' : '<span class="etiqueta sucesso">Ativo</span>'}
+      ${u.papel === 'dono' ? '<span class="etiqueta sucesso">Master</span>' : u.pendente ? '<span class="etiqueta alerta">Aprovar</span>' : u.ativo === false ? '<span class="etiqueta neutra">Inativo</span>' : '<span class="etiqueta sucesso">Ativo</span>'}
     </${tag}>`;
   };
 
   conteudo.innerHTML = `
     ${pendentes().length ? `<div class="aviso-faixa alerta">${IC.relogio}<span><strong>${pendentes().length} cadastro(s) aguardando aprovação.</strong> Toque no nome para escolher as permissões e liberar.</span></div>` : ''}
-    <div class="aviso-faixa info">${IC.pessoas}<span><strong>${funcs.length} de ${CONFIG.MAX_FUNCIONARIOS}</strong> funcionários cadastrados. Cada um entra com seu próprio usuário e senha e só vê o que você liberar.</span></div>
+    ${cartaoCodigoLoja()}
+    <div class="aviso-faixa info">${IC.pessoas}<span><strong>1 master + ${funcs.length} de ${CONFIG.MAX_FUNCIONARIOS}</strong> funcionários. Cada um entra com seu próprio usuário e senha e só vê o que você liberar.</span></div>
     <div class="lista">${dono ? item(dono) : ''}${funcs.map(item).join('')}</div>
     ${!funcs.length ? '<p class="vazio">Nenhum funcionário ainda.</p>' : ''}
     ${cheio ? `<div class="aviso-faixa alerta">${IC.alerta}<span>Limite de ${CONFIG.MAX_FUNCIONARIOS} funcionários atingido. Exclua ou edite um existente.</span></div>`
@@ -1782,7 +1831,7 @@ function dataHoraBR(iso) {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 function situacaoUsuario(u) {
-  if (u.papel === 'dono') return ['Dono', 'sucesso'];
+  if (u.papel === 'dono') return ['Master', 'sucesso'];
   if (u.pendente) return ['Aguardando aprovação', 'alerta'];
   if (u.ativo === false) return ['Inativo', 'neutra'];
   return ['Ativo', 'sucesso'];
@@ -1804,7 +1853,7 @@ function telaCadastros() {
 
   conteudo.innerHTML = `
     ${cabecalhoImpressao('Registro de cadastros')}
-    <div class="aviso-faixa info">${IC.loja}<span><strong>Empresa: ${esc(loja().nome)}</strong><br>${todos.length} pessoa(s) cadastrada(s): 1 dono e ${funcs.length} de ${CONFIG.MAX_FUNCIONARIOS} funcionários.</span></div>
+    <div class="aviso-faixa info">${IC.loja}<span><strong>Empresa: ${esc(loja().nome)}</strong> · código ${codigoLoja(loja())}<br>${todos.length} pessoa(s): 1 master (dono) e ${funcs.length} de ${CONFIG.MAX_FUNCIONARIOS} funcionários.</span></div>
     <div class="grade-2">
       <div class="indicador sucesso"><div class="rotulo">Funcionários ativos</div><div class="valor">${ativos}</div></div>
       <div class="indicador alerta"><div class="rotulo">Aguardando aprovação</div><div class="valor">${pend}</div></div>
@@ -1820,7 +1869,7 @@ function telaCadastros() {
       <div class="cartao registro-usuario">
         <div class="registro-topo">
           <div class="avatar">${esc(iniciais(u.nome))}</div>
-          <div class="item-corpo"><div class="item-titulo">${esc(u.nome)}</div><div class="item-sub">@${esc(u.login)} · ${u.papel === 'dono' ? 'Dono' : 'Funcionário'}</div></div>
+          <div class="item-corpo"><div class="item-titulo">${esc(u.nome)}</div><div class="item-sub">@${esc(u.login)} · ${u.papel === 'dono' ? 'Master (dono)' : 'Funcionário'}</div></div>
           <span class="etiqueta ${tipo}">${sit}</span>
         </div>
         <dl class="dados-cliente">
@@ -1847,6 +1896,7 @@ function telaLoja() {
   definirTopo('Dados da loja', '#/mais');
   const l = loja();
   conteudo.innerHTML = `
+    ${cartaoCodigoLoja()}
     <form id="form" class="cartao" novalidate>
       ${camposLoja(l)}
       <button class="btn btn-primario btn-bloco" type="submit">Salvar</button>
@@ -1899,9 +1949,7 @@ const ROTAS = [
 const ROTAS_FORMULARIO = /\/(novo|editar|compra|pagamento)(\?senha)?$|^#\/loja$/;
 
 function rotear() {
-  // Sem loja ou sem dono cadastrado = primeira configuração
-  if (semLoja()) return telaLogin();
-  if (!estado.usuario) return telaLogin();
+  if (!estado.usuario || !loja()) { estado.usuario = null; return telaLogin(); }
   const hash = location.hash || '#/inicio';
   for (const [regex, tela] of ROTAS) {
     const m = hash.match(regex);
