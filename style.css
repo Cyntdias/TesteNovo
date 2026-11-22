@@ -243,6 +243,11 @@ a.item:hover, button.item:hover { background: #F8FAFC; cursor: pointer; }
 .tabela .num { text-align: right; white-space: nowrap; }
 .tabela tfoot td { font-weight: 700; border-bottom: 0; }
 
+/* Código da loja */
+.codigo-loja { display: flex; align-items: center; gap: var(--e4); border: 2px dashed var(--primaria); background: var(--primaria-clara); box-shadow: none; }
+.codigo-loja .rotulo { font-size: var(--t-xs); color: var(--primaria-escura); font-weight: 600; }
+.codigo-loja .codigo { font-size: var(--t-xl); font-weight: 700; letter-spacing: .12em; color: var(--primaria-escura); font-variant-numeric: tabular-nums; }
+
 /* Registro de cadastros */
 .registro-usuario .registro-topo { display: flex; align-items: center; gap: var(--e3); margin-bottom: var(--e3); }
 
