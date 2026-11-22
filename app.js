@@ -716,12 +716,12 @@ function telaRecuperar() {
           <p class="dica cor-suave" style="margin:0 0 16px">Digite o seu usuário. Vamos enviar um código de 6 números para o e-mail cadastrado.</p>
           ${campo({ rotulo: 'Usuário', nome: 'login', valor: r.login, obrig: true, attrs: 'autocapitalize="none" autocomplete="username"' })}
           <button class="btn btn-primario btn-bloco" type="submit">Enviar código</button>
-          <button type="button" class="btn btn-texto btn-bloco" id="btn-voltar" style="margin-top:8px">Voltar para Entrar</button>
+          <button type="button" class="btn btn-texto btn-bloco" id="btn-voltar-entrar" style="margin-top:8px">Voltar para Entrar</button>
         </form>
       </div>`;
     const form = $('#form');
     form.login.focus();
-    $('#btn-voltar').addEventListener('click', voltar);
+    $('#btn-voltar-entrar').addEventListener('click', voltar);
     form.addEventListener('submit', async e => {
       e.preventDefault();
       const login = normalizar(lerFormulario(form).login);
@@ -750,14 +750,14 @@ function telaRecuperar() {
         <button class="btn btn-primario btn-bloco" type="submit">Salvar nova senha</button>
         <div class="acoes" style="margin-top:8px">
           <button type="button" class="btn btn-texto" id="btn-reenviar">Reenviar código</button>
-          <button type="button" class="btn btn-texto" id="btn-voltar">Voltar para Entrar</button>
+          <button type="button" class="btn btn-texto" id="btn-voltar-entrar">Voltar para Entrar</button>
         </div>
       </form>
     </div>`;
   const form = $('#form');
   ligarMostrarSenha(form);
   form.codigo.focus();
-  $('#btn-voltar').addEventListener('click', voltar);
+  $('#btn-voltar-entrar').addEventListener('click', voltar);
   $('#btn-reenviar').addEventListener('click', async () => {
     let resp;
     if (!await tentar(form, 'codigo', async () => { resp = await API.pedirCodigoSenha(r.login); })) return;
