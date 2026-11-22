@@ -139,6 +139,7 @@ const IC = {
   relogio: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', 20),
   atualizar: svg('<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>', 22),
   calendario: svg('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>', 20),
+  recibo: svg('<path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3"/>', 18),
   check: svg('<path d="M20 6 9 17l-5-5"/>', 18),
   caderno: svg('<path d="M5 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5zM9 3v18M12 8h4M12 12h4"/>', 48)
 };
@@ -955,7 +956,10 @@ function telaClienteDetalhe(id) {
     ${extrato.length ? `<div class="lista">${extrato.map(l => {
       const editavel = pode('lancamentos_editar');
       const tag = editavel ? 'a' : 'div';
+      const botaoRecibo = l.tipo === 'pagamento'
+        ? `<a class="btn btn-secundario btn-pequeno btn-recibo" href="#/recibo/${l.id}" aria-label="Ver recibo do pagamento de ${brl(l.valor)}">${IC.recibo} Recibo</a>` : '';
       return `
+      <div class="item-com-recibo">
       <${tag} class="item" ${editavel ? `href="#/lancamentos/${l.id}/editar"` : ''}>
         <div class="icone-lanc ${l.tipo}">${l.tipo === 'compra' ? IC.compra : IC.pagamento}</div>
         <div class="item-corpo">
@@ -966,7 +970,9 @@ function telaClienteDetalhe(id) {
           ${l.tipo === 'compra' ? `<div style="margin-top:4px">${etiquetaCompra(l)}</div>` : ''}
         </div>
         <div class="item-valor ${l.tipo === 'compra' ? 'cor-perigo' : 'cor-sucesso'}">${l.tipo === 'compra' ? '+' : '−'} ${brl(l.valor)}</div>
-      </${tag}>`;
+      </${tag}>
+      ${botaoRecibo}
+      </div>`;
     }).join('')}</div>` : '<div class="cartao vazio">Nenhum lançamento ainda.</div>'}
 
     <div class="acoes" style="margin-top:24px">
@@ -1013,18 +1019,22 @@ function telaClienteDetalhe(id) {
       ]
     });
     if (!forma) return;
+    const recibo_num = proximoNumeroRecibo();
+    let primeiro;
     const ok = await executar(async () => {
       for (const a of sel) {
-        await API.criar('lancamento', {
+        const p = await API.criar('lancamento', {
           cliente_id: id, tipo: 'pagamento', valor: a.restante, data: hojeISO(), forma,
-          compra_id: a.id, descricao: `Pagamento de: ${nomeCompra(a)}`,
+          compra_id: a.id, descricao: `Pagamento de: ${nomeCompra(a)}`, recibo_num,
           usuario_id: estado.usuario.id, usuario_nome: estado.usuario.nome
         });
+        primeiro ||= p;
       }
     });
     conteudo.classList.remove('com-barra');
-    if (ok) toast(sel.length === 1 ? 'Compra marcada como paga! ✓' : `${sel.length} compras marcadas como pagas! ✓`, 'ok');
-    rotear();
+    if (!ok) { rotear(); return; }
+    toast(sel.length === 1 ? 'Compra marcada como paga! ✓' : `${sel.length} compras marcadas como pagas! ✓`, 'ok');
+    location.hash = `#/recibo/${primeiro.id}`;
   });
 
   $('#btn-excluir')?.addEventListener('click', async () => {
@@ -1262,7 +1272,10 @@ function telaLancamentoForm({ clienteId, tipo, lancId }) {
             parcela: i + 1, parcelas: n, grupo_id: grupo, valor_total: valor
           });
         }
-      } else await API.criar('lancamento', { ...dados, ...autor });
+      } else {
+        const novo = await API.criar('lancamento', { ...dados, ...autor, ...(ehCompra ? {} : { recibo_num: proximoNumeroRecibo() }) });
+        if (!ehCompra) estado.reciboNovo = novo.id;
+      }
     });
     if (!ok) return;
     toast(lanc ? 'Lançamento atualizado!' : n > 1 ? `Compra parcelada em ${n}x lançada!` : ehCompra ? `Compra de ${brl(valor)} lançada!` : 'Pagamento registrado!', 'ok');
@@ -1273,6 +1286,7 @@ function telaLancamentoForm({ clienteId, tipo, lancId }) {
       window.scrollTo(0, 0);
       return;
     }
+    if (estado.reciboNovo) { const r = estado.reciboNovo; estado.reciboNovo = null; location.hash = `#/recibo/${r}`; return; }
     location.hash = `#/clientes/${clienteId}`;
   });
 
@@ -1302,6 +1316,141 @@ function telaLancamentoForm({ clienteId, tipo, lancId }) {
     toast(apagar.length > 1 ? `${apagar.length} parcelas excluídas.` : 'Lançamento excluído.', 'ok');
     location.hash = `#/clientes/${clienteId}`;
   });
+}
+
+/* ===================== RECIBO ===================== */
+/* Número sequencial por loja. Pagamentos antigos (sem número) contam na ordem em que foram feitos. */
+function pagamentosDaLoja() {
+  return API.listar('lancamento').filter(l => l.tipo === 'pagamento')
+    .sort((a, b) => String(a.criado_em).localeCompare(String(b.criado_em)));
+}
+function proximoNumeroRecibo() {
+  const pags = pagamentosDaLoja();
+  const maior = Math.max(0, ...pags.map(p => Number(p.recibo_num) || 0));
+  return Math.max(maior, pags.filter(p => !p.recibo_num).length) + 1;
+}
+function numeroRecibo(p) {
+  if (p.recibo_num) return p.recibo_num;
+  return pagamentosDaLoja().filter(x => !x.recibo_num).findIndex(x => x.id === p.id) + 1;
+}
+
+/* Valor por extenso: 1234,56 -> "mil duzentos e trinta e quatro reais e cinquenta e seis centavos" */
+function porExtenso(valor) {
+  const un = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove', 'dez', 'onze', 'doze', 'treze',
+              'quatorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove'];
+  const dez = ['', '', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa'];
+  const cen = ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos', 'seiscentos', 'setecentos', 'oitocentos', 'novecentos'];
+  const ate999 = n => {
+    if (n === 100) return 'cem';
+    const c = Math.floor(n / 100), r = n % 100, d = Math.floor(r / 10), u = r % 10;
+    const partes = [];
+    if (c) partes.push(cen[c]);
+    if (r) partes.push(r < 20 ? un[r] : dez[d] + (u ? ' e ' + un[u] : ''));
+    return partes.join(' e ');
+  };
+  const inteiro = n => {
+    if (n === 0) return 'zero';
+    const grupos = [[1e9, 'bilhão', 'bilhões'], [1e6, 'milhão', 'milhões'], [1e3, 'mil', 'mil'], [1, '', '']];
+    const partes = [];
+    let resto = n;
+    for (const [base, sing, plur] of grupos) {
+      const q = Math.floor(resto / base);
+      resto %= base;
+      if (!q) continue;
+      const txt = base === 1e3 ? (q === 1 ? 'mil' : `${ate999(q)} mil`) : base === 1 ? ate999(q) : `${ate999(q)} ${q === 1 ? sing : plur}`;
+      partes.push({ q, txt });
+    }
+    if (partes.length === 1) return partes[0].txt;
+    // "e" antes do último grupo quando ele é menor que 100 ou centena redonda (mil e cinquenta, um milhão e quinhentos mil)
+    const ult = partes[partes.length - 1];
+    const sep = ult.q < 100 || ult.q % 100 === 0 ? ' e ' : ' ';
+    return partes.slice(0, -1).map(x => x.txt).join(' ') + sep + ult.txt;
+  };
+  const centavos = Math.round(Math.abs(valor) * 100);
+  const reais = Math.floor(centavos / 100), cents = centavos % 100;
+  const milhoesRedondos = reais >= 1e6 && reais % 1e6 === 0;
+  const txtReais = reais ? `${inteiro(reais)}${milhoesRedondos ? ' de' : ''} ${reais === 1 ? 'real' : 'reais'}` : '';
+  const txtCents = cents ? `${inteiro(cents)} ${cents === 1 ? 'centavo' : 'centavos'}` : '';
+  return [txtReais, txtCents].filter(Boolean).join(' e ') || 'zero reais';
+}
+
+function telaRecibo(id) {
+  if (!exigir('clientes_ver')) return;
+  const pag = API.obter(id);
+  if (!pag || pag.tabela !== 'lancamento' || pag.tipo !== 'pagamento') return naoEncontrado('#/clientes');
+  const c = API.obter(pag.cliente_id);
+  const l = loja();
+  // pagamentos feitos juntos (marcar várias compras) saem no mesmo recibo
+  const grupo = pag.recibo_num
+    ? API.listar('lancamento').filter(x => x.tipo === 'pagamento' && x.cliente_id === pag.cliente_id && x.recibo_num === pag.recibo_num)
+    : [pag];
+  const total = somar(grupo, x => x.valor);
+  const num = String(numeroRecibo(pag)).padStart(4, '0');
+  const compras = Object.fromEntries(API.listar('lancamento').filter(x => x.tipo === 'compra').map(x => [x.id, x]));
+  const referente = grupo.map(x => {
+    const cp = compras[x.compra_id];
+    if (cp) return `${cp.descricao || 'Compra no fiado'}${sufixoParcela(cp)} (compra de ${dataBR(cp.data)})`;
+    return x.descricao || 'pagamento de compras no fiado';
+  });
+  // saldo logo depois deste pagamento (lançamentos feitos até ele)
+  const limiteTempo = grupo.map(x => String(x.criado_em)).sort().pop();
+  const ate = API.listar('lancamento').filter(x => x.cliente_id === pag.cliente_id && String(x.criado_em) <= limiteTempo);
+  const saldoDepois = arred(somar(ate.filter(x => x.tipo === 'compra'), x => x.valor) - somar(ate.filter(x => x.tipo === 'pagamento'), x => x.valor));
+  const nomeCli = c ? c.nome : '(cliente excluído)';
+  const docLoja = [l.documento ? `CNPJ/CPF ${l.documento}` : '', l.telefone ? formatarTelefone(l.telefone) : '', l.endereco || ''].filter(Boolean);
+
+  definirTopo(`Recibo nº ${num}`, c ? `#/clientes/${c.id}` : '#/clientes');
+  const textoRecibo =
+    `RECIBO Nº ${num} — ${l.nome}\n` +
+    `Recebemos de ${nomeCli} a quantia de ${brl(total)} (${porExtenso(total)}), ` +
+    `referente a ${referente.join('; ')}, em ${dataBR(pag.data)}, via ${pag.forma || 'pagamento'}.\n` +
+    (saldoDepois > 0 ? `Saldo em aberto após este pagamento: ${brl(saldoDepois)}.\n` : 'Conta quitada após este pagamento.\n') +
+    `Recebido por: ${pag.usuario_nome || l.nome}.`;
+
+  conteudo.innerHTML = `
+    <article class="cartao recibo" aria-label="Recibo número ${num}">
+      <header class="recibo-topo">
+        ${logoValido(l.logo) ? `<img src="${esc(l.logo)}" alt="" class="recibo-logo">` : `<div class="recibo-logo recibo-logo-vazio">${IC.loja}</div>`}
+        <div>
+          <div class="recibo-loja">${esc(l.nome)}</div>
+          ${docLoja.length ? `<div class="recibo-dados">${docLoja.map(esc).join(' · ')}</div>` : ''}
+        </div>
+      </header>
+      <div class="recibo-titulo"><span>RECIBO</span><span>Nº ${num}</span></div>
+      <div class="recibo-valor">${brl(total)}</div>
+      <p class="recibo-texto">
+        Recebemos de <strong>${esc(nomeCli)}</strong>${c?.cpf ? `, CPF ${esc(c.cpf)},` : ''} a quantia de
+        <strong>${brl(total)}</strong> (${esc(porExtenso(total))}), referente a
+        ${referente.map(r => `<em>${esc(r)}</em>`).join('; ')}.
+      </p>
+      <dl class="dados-cliente recibo-detalhes">
+        <div><dt>Data do pagamento</dt><dd>${dataBR(pag.data)}</dd></div>
+        <div><dt>Forma de pagamento</dt><dd>${esc(pag.forma || '—')}</dd></div>
+        <div><dt>Recebido por</dt><dd>${esc(pag.usuario_nome || '—')}</dd></div>
+        <div><dt>${saldoDepois > 0 ? 'Saldo em aberto após este pagamento' : 'Situação'}</dt><dd class="${saldoDepois > 0 ? 'cor-perigo' : 'cor-sucesso'}">${saldoDepois > 0 ? brl(saldoDepois) : 'Conta quitada ✓'}</dd></div>
+      </dl>
+      <div class="recibo-assinatura">
+        <div class="linha"></div>
+        <div>${esc(l.nome)}</div>
+        <div class="cor-suave">${dataBR(pag.data)}</div>
+      </div>
+    </article>
+    <div class="acoes nao-imprimir">
+      <button type="button" class="btn btn-primario" id="btn-enviar">${IC.recibo} Enviar recibo</button>
+      <button type="button" class="btn btn-secundario" id="btn-imprimir">${IC.imprimir} Imprimir / PDF</button>
+    </div>
+    ${c ? `<a class="btn btn-texto btn-bloco nao-imprimir" href="#/clientes/${c.id}" style="margin-top:8px">Voltar para ${esc(nomeCli.split(' ')[0])}</a>` : ''}`;
+
+  $('#btn-imprimir').onclick = () => window.print();
+  $('#btn-enviar').onclick = async () => {
+    // abre as opções de compartilhar do celular (WhatsApp, e-mail, SMS...); no computador, copia o texto
+    if (navigator.share) {
+      try { await navigator.share({ title: `Recibo nº ${num} — ${l.nome}`, text: textoRecibo }); return; }
+      catch (e) { if (e.name === 'AbortError') return; }
+    }
+    try { await navigator.clipboard.writeText(textoRecibo); toast('Recibo copiado! Cole na conversa ou no e-mail.', 'ok'); }
+    catch { informar('Copie o recibo', textoRecibo); }
+  };
 }
 
 /* ===================== TELA: Avisos de vencimento ===================== */
@@ -1930,7 +2079,8 @@ const ROTAS = [
   [/^#\/equipe\/novo$/, () => telaFuncionarioForm()],
   [/^#\/equipe\/([\w-]+)\/editar(\?senha)?$/, (id, senha) => telaFuncionarioForm(id, Boolean(senha))],
   [/^#\/loja$/, telaLoja],
-  [/^#\/cadastros$/, telaCadastros]
+  [/^#\/cadastros$/, telaCadastros],
+  [/^#\/recibo\/([\w-]+)$/, id => telaRecibo(id)]
 ];
 const ROTAS_FORMULARIO = /\/(novo|editar|compra|pagamento)(\?senha)?$|^#\/loja$/;
 
