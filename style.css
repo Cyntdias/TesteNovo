@@ -120,7 +120,6 @@ h2, h3 { margin: 0; }
 .btn-perigo { background: var(--perigo); color: #fff; }
 .btn-perigo-contorno { background: var(--superficie); color: var(--perigo); border-color: var(--perigo); }
 .btn-sucesso { background: var(--sucesso); color: #fff; }
-.btn-whats { background: #25D366; color: #073B1E; }
 .btn-texto { background: transparent; color: var(--primaria); padding: 0 var(--e3); }
 .btn-bloco { width: 100%; }
 .btn-pequeno { min-height: 40px; padding: 0 var(--e3); font-size: var(--t-sm); }
