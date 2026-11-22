@@ -886,7 +886,12 @@ function telaClienteDetalhe(id) {
   definirTopo(c.nome, '#/clientes');
   const s = situacao(id);
   const restantePorCompra = Object.fromEntries(s.abertas.map(a => [a.id, a.restante]));
-  const extrato = [...s.lancs].sort((a, b) =>
+  // baixa de uma compra (marcar como paga) aparece junto da própria compra, sem linha separada
+  const idsCompras = new Set(s.lancs.filter(l => l.tipo === 'compra').map(l => l.id));
+  const baixasPorCompra = {};
+  s.lancs.filter(l => l.tipo === 'pagamento' && idsCompras.has(l.compra_id))
+    .forEach(p => (baixasPorCompra[p.compra_id] ||= []).push(p));
+  const extrato = s.lancs.filter(l => !(l.tipo === 'pagamento' && idsCompras.has(l.compra_id))).sort((a, b) =>
     b.data.localeCompare(a.data) ||                                   // mais recentes primeiro
     (a.grupo_id && a.grupo_id === b.grupo_id ? (a.parcela || 0) - (b.parcela || 0) : 0) || // parcelas em ordem: 1/12, 2/12…
     String(b.criado_em).localeCompare(String(a.criado_em)));
@@ -937,7 +942,7 @@ function telaClienteDetalhe(id) {
         </div>
         <div class="item-valor cor-perigo">${brl(a.restante)}</div>
       </${podeBaixar ? 'label' : 'div'}>`).join('')}</div>
-    ${podeBaixar ? '<p class="dica cor-suave" style="margin:-8px 0 16px">Marcou errado? Toque no pagamento no histórico para desfazer.</p>' : ''}`
+    ${podeBaixar ? '<p class="dica cor-suave" style="margin:-8px 0 16px">Marcou errado? No histórico, toque em Desfazer baixa na compra.</p>' : ''}`
     : `<div class="cartao vazio" style="padding:16px">${s.lancs.length ? '✓ Todas as compras estão pagas.' : 'Nenhuma compra lançada ainda.'}</div>`}
 
     <div class="cartao">
@@ -956,20 +961,30 @@ function telaClienteDetalhe(id) {
     ${extrato.length ? `<div class="lista">${extrato.map(l => {
       const editavel = pode('lancamentos_editar');
       const tag = editavel ? 'a' : 'div';
-      const botaoRecibo = l.tipo === 'pagamento'
-        ? `<a class="btn btn-secundario btn-pequeno btn-recibo" href="#/recibo/${l.id}" aria-label="Ver recibo do pagamento de ${brl(l.valor)}">${IC.recibo} Recibo</a>` : '';
+      const baixas = l.tipo === 'compra' ? (baixasPorCompra[l.id] || []) : [];
+      const ultimaBaixa = baixas[baixas.length - 1];
+      const quitada = baixas.length && !restantePorCompra[l.id];
+      const pagRecibo = l.tipo === 'pagamento' ? l : ultimaBaixa;
+      const botaoRecibo = pagRecibo || (baixas.length && editavel)
+        ? `<div class="acoes-item">
+            ${pagRecibo ? `<a class="btn btn-secundario btn-pequeno btn-recibo" href="#/recibo/${pagRecibo.id}" aria-label="Ver recibo do pagamento de ${brl(pagRecibo.valor)}">${IC.recibo} Recibo</a>` : ''}
+            ${baixas.length && editavel ? `<button type="button" class="btn btn-texto btn-pequeno btn-desfazer" data-compra="${l.id}">Desfazer baixa</button>` : ''}
+          </div>` : '';
+      const linhaBaixa = ultimaBaixa
+        ? `<div class="item-sub cor-sucesso">${quitada ? '✓ Paga' : 'Pagou parte'} em ${dataBR(ultimaBaixa.data)}${ultimaBaixa.forma ? ` · ${esc(ultimaBaixa.forma)}` : ''}${ultimaBaixa.usuario_nome ? ` · por ${esc(ultimaBaixa.usuario_nome.split(' ')[0])}` : ''}</div>` : '';
       return `
       <div class="item-com-recibo">
       <${tag} class="item" ${editavel ? `href="#/lancamentos/${l.id}/editar"` : ''}>
-        <div class="icone-lanc ${l.tipo}">${l.tipo === 'compra' ? IC.compra : IC.pagamento}</div>
+        <div class="icone-lanc ${quitada ? 'pagamento' : l.tipo}">${l.tipo === 'compra' ? IC.compra : IC.pagamento}</div>
         <div class="item-corpo">
           <div class="item-titulo">${l.tipo === 'pagamento' && comprasPorId[l.compra_id]
             ? `Pago: ${esc(nomeCompra(comprasPorId[l.compra_id]))}`
             : esc((l.descricao || (l.tipo === 'compra' ? 'Compra no fiado' : 'Pagamento')) + (l.tipo === 'compra' ? sufixoParcela(l) : ''))}</div>
           <div class="item-sub">${dataBR(l.data)}${l.tipo === 'compra' ? ` · vence ${dataBR(l.vencimento)}` : l.forma ? ` · ${esc(l.forma)}` : ''}${l.usuario_nome ? ` · por ${esc(l.usuario_nome.split(' ')[0])}` : ''}</div>
-          ${l.tipo === 'compra' ? `<div style="margin-top:4px">${etiquetaCompra(l)}</div>` : ''}
+          ${linhaBaixa}
+          ${l.tipo === 'compra' && !quitada ? `<div style="margin-top:4px">${etiquetaCompra(l)}</div>` : ''}
         </div>
-        <div class="item-valor ${l.tipo === 'compra' ? 'cor-perigo' : 'cor-sucesso'}">${l.tipo === 'compra' ? '+' : '−'} ${brl(l.valor)}</div>
+        <div class="item-valor ${l.tipo === 'compra' ? (quitada ? 'cor-suave' : 'cor-perigo') : 'cor-sucesso'}">${l.tipo === 'compra' ? '+' : '−'} ${brl(l.valor)}</div>
       </${tag}>
       ${botaoRecibo}
       </div>`;
@@ -1036,6 +1051,22 @@ function telaClienteDetalhe(id) {
     toast(sel.length === 1 ? 'Compra marcada como paga! ✓' : `${sel.length} compras marcadas como pagas! ✓`, 'ok');
     location.hash = `#/recibo/${primeiro.id}`;
   });
+
+  // Desfazer baixa: apaga o(s) pagamento(s) ligados à compra e ela volta a ficar em aberto
+  $$('.btn-desfazer').forEach(b => b.addEventListener('click', async () => {
+    const compra = comprasPorId[b.dataset.compra];
+    const pags = baixasPorCompra[b.dataset.compra] || [];
+    if (!compra || !pags.length) return;
+    const sim = await confirmar({
+      titulo: 'Desfazer baixa?',
+      mensagem: `"${nomeCompra(compra)}" volta a ficar em aberto e o pagamento de ${brl(somar(pags, p => p.valor))} sai do histórico e do painel.`,
+      ok: 'Desfazer', perigo: true
+    });
+    if (!sim) return;
+    if (!await executar(async () => { for (const p of pags) await API.excluir(p.id); })) return;
+    toast('Baixa desfeita. A compra voltou para em aberto.', 'ok');
+    rotear();
+  }));
 
   $('#btn-excluir')?.addEventListener('click', async () => {
     const extra = s.saldo > 0 ? ` Atenção: ele ainda deve ${brl(s.saldo)}.` : '';
