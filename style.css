@@ -251,7 +251,9 @@ a.item:hover, button.item:hover { background: #F8FAFC; cursor: pointer; }
 .item-com-recibo { border-bottom: 1px solid var(--borda); }
 .item-com-recibo:last-child { border-bottom: 0; }
 .item-com-recibo > .item { border-bottom: 0; }
-.btn-recibo { margin: -6px 16px 12px 68px; min-height: 36px; }
+.acoes-item { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -6px 16px 12px 68px; }
+.acoes-item .btn { min-height: 36px; }
+.btn-desfazer { color: var(--texto-suave); }
 .recibo { padding: var(--e5); }
 .recibo-topo { display: flex; align-items: center; gap: var(--e3); padding-bottom: var(--e4); border-bottom: 1px solid var(--borda); }
 .recibo-logo { width: 52px; height: 52px; border-radius: 12px; object-fit: contain; background: #fff; flex-shrink: 0; }
