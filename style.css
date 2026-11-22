@@ -300,7 +300,7 @@ a.item:hover, button.item:hover { background: #F8FAFC; cursor: pointer; }
 .marca { text-align: center; margin-bottom: var(--e5); }
 .marca img { width: 72px; height: 72px; border-radius: 18px; }
 .marca h1 { font-size: var(--t-xl); margin: var(--e3) 0 var(--e1); color: var(--primaria-escura); }
-.marca p { margin: 0; color: var(--texto-suave); }
+.marca p { margin: 0; color: #334155; font-size: 17px; font-weight: 600; letter-spacing: .01em; }
 
 /* Logo da loja */
 .marca .marca-logo { width: 96px; height: 96px; max-height: 96px; border-radius: 24px; object-fit: contain; background: #fff; box-shadow: var(--sombra); }
